@@ -20,9 +20,13 @@ raccolti, senza dover tornare in QGIS desktop.
   I layer creati al suo interno compaiono in legenda.
 - **Creazione layer sul campo**: nome, tipo di geometria (punto, linea,
   poligono) e campi attributo personalizzati aggiunti uno alla volta con
-  nome + tipo (Testo, Numero, Data) da un'interfaccia guidata.
+  nome + tipo (Testo, Numero intero, Numero decimale, Data) da
+  un'interfaccia guidata.
   I layer sono salvati come **GeoJSON (EPSG:4326)** nella sottocartella
   `qfield_layers/` del progetto corrente.
+- **Diagnostica integrata**: il pulsante **Diagnostica** mostra (e copia
+  negli appunti) lo stato di percorsi, progetto, indice e file dei layer —
+  utile per segnalare problemi.
 - **Layer nella legenda (TOC)**: se il progetto aperto è un file **`.qgs`**,
   il nuovo layer viene registrato automaticamente nel progetto (con **backup
   automatico** in `<progetto>.qgs.createlayer.bak`) e il progetto viene

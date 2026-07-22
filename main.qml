@@ -85,6 +85,10 @@ Item {
     mainWindow.displayToast(message)
   }
 
+  function logDebug(message) {
+    iface.logMessage('[createlayer] ' + message)
+  }
+
   // ---------------------------------------------------------------------
   // Utilità file (FileUtils restituisce QByteArray: decodifica robusta)
   // ---------------------------------------------------------------------
@@ -166,7 +170,8 @@ Item {
   property var newFields: []
 
   function typeLabel(ftype) {
-    if (ftype === 'number') return qsTr('Numero')
+    if (ftype === 'integer') return qsTr('Numero intero')
+    if (ftype === 'number') return qsTr('Numero decimale')
     if (ftype === 'date') return qsTr('Data')
     return qsTr('Testo')
   }
@@ -200,7 +205,9 @@ Item {
   function templateFeature(fields) {
     const props = {}
     for (let i = 0; i < fields.length; i++) {
-      if (fields[i].type === 'number')
+      if (fields[i].type === 'integer')
+        props[fields[i].name] = 1
+      else if (fields[i].type === 'number')
         props[fields[i].name] = 0.1
       else if (fields[i].type === 'date')
         props[fields[i].name] = '2000-01-01'
@@ -238,7 +245,7 @@ Item {
       'features': (fields.length > 0 && inTocMode) ? [templateFeature(fields)] : []
     }
     if (!FileUtils.writeFileContent(layersDir() + '/' + file, JSON.stringify(collection))) {
-      iface.logMessage('[createlayer] scrittura fallita: ' + layersDir() + '/' + file)
+      logDebug('scrittura fallita: ' + layersDir() + '/' + file)
       toast(qsTr('Errore: impossibile scrivere il file del layer (cartella di sola lettura?)'))
       return false
     }
@@ -309,20 +316,68 @@ Item {
     return geomType === 'Polygon' ? 'Polygon' : 'Point'
   }
 
+  // Riconosce i progetti generati dal plugin (ricostruibili da template)
+  function isPluginProject() {
+    const p = projectFilePath()
+    return p.indexOf('/createlayer_projects/') >= 0
+        || FileUtils.fileName(p) === 'starter_project.qgs'
+  }
+
+  function currentViewExtentWgs84() {
+    try {
+      const center = mapCanvas.mapSettings.screenToCoordinate(
+        Qt.point(mapCanvas.width / 2, mapCanvas.height / 2))
+      const wgs = GeometryUtils.reprojectPointToWgs84(center, mapCanvas.mapSettings.destinationCrs)
+      if (isFinite(wgs.x) && isFinite(wgs.y) && (wgs.x !== 0 || wgs.y !== 0))
+        return { 'xmin': wgs.x - 0.005, 'ymin': wgs.y - 0.005, 'xmax': wgs.x + 0.005, 'ymax': wgs.y + 0.005 }
+    } catch (e) {
+    }
+    return { 'xmin': -180, 'ymin': -60, 'xmax': 180, 'ymax': 75 }
+  }
+
   function addLayerToProject(lyr) {
     const path = projectFilePath()
     let xml = toStr(FileUtils.readFileContent(path))
     if (xml === '') {
-      iface.logMessage('[createlayer] lettura progetto fallita o vuota: ' + path)
+      logDebug('lettura progetto fallita o vuota: ' + path)
+      if (!isPluginProject())
+        return false
+      // Progetto generato dal plugin: ricostruito da zero dal template,
+      // reinserendo i layer già registrati (modalità solo scrittura)
+      let projName = FileUtils.fileName(path).replace(/\.qgs$/i, '')
+      xml = projectTemplate(projName, currentViewExtentWgs84())
+      for (let i = 0; i < layerIndex.length; i++) {
+        if (layerIndex[i].inProject) {
+          const reinjected = injectLayerXml(xml, layerIndex[i])
+          if (reinjected)
+            xml = reinjected
+        }
+      }
+      logDebug('progetto rigenerato dal template: ' + path)
+    } else {
+      // Backup del progetto prima di modificarlo
+      FileUtils.writeFileContent(path + '.createlayer.bak', xml)
+    }
+
+    const result = injectLayerXml(xml, lyr)
+    if (result === null) {
+      logDebug('iniezione layer fallita (struttura progetto inattesa): ' + path)
       return false
     }
-    if (xml.indexOf('<layer-tree-group') < 0)
+    if (!FileUtils.writeFileContent(path, result)) {
+      logDebug('scrittura progetto fallita: ' + path)
       return false
-    if (xml.indexOf('</projectlayers>') < 0 && xml.indexOf('<projectlayers/>') < 0)
-      return false
+    }
+    return true
+  }
 
-    // Backup del progetto prima di modificarlo
-    FileUtils.writeFileContent(path + '.createlayer.bak', xml)
+  // Inserisce il layer nell'XML di progetto; restituisce il nuovo XML o
+  // null se la struttura non è riconoscibile
+  function injectLayerXml(xml, lyr) {
+    if (xml.indexOf('<layer-tree-group') < 0)
+      return null
+    if (xml.indexOf('</projectlayers>') < 0 && xml.indexOf('<projectlayers/>') < 0)
+      return null
 
     const source = layerSource(lyr)
 
@@ -346,10 +401,10 @@ Item {
         + '" providerKey="ogr" checked="Qt::Checked" expanded="1"/>'
     const groupStart = xml.indexOf('<layer-tree-group')
     if (groupStart < 0)
-      return false
+      return null
     let groupEnd = xml.indexOf('>', groupStart)
     if (groupEnd < 0)
-      return false
+      return null
     if (xml.charAt(groupEnd - 1) === '/') {
       // Gruppo radice vuoto e auto-chiuso: va riaperto
       xml = xml.slice(0, groupEnd - 1) + '>' + treeLayer + '\n  </layer-tree-group>' + xml.slice(groupEnd + 1)
@@ -357,11 +412,7 @@ Item {
       xml = xml.slice(0, groupEnd + 1) + treeLayer + xml.slice(groupEnd + 1)
     }
 
-    if (!FileUtils.writeFileContent(path, xml)) {
-      iface.logMessage('[createlayer] scrittura progetto fallita: ' + path)
-      return false
-    }
-    return true
+    return xml
   }
 
   function removeLayerFromProject(lyr) {
@@ -514,7 +565,7 @@ Item {
     const projPath = projectsDir + '/' + dirName + '/' + dirName + '.qgs'
     if (!FileUtils.writeFileContent(projPath, projectTemplate(name.trim(), ext))
         || !FileUtils.fileExists(projPath)) {
-      iface.logMessage('[createlayer] scrittura progetto fallita: ' + projPath)
+      logDebug('scrittura progetto fallita: ' + projPath)
       toast(qsTr('Errore: impossibile scrivere il file di progetto (cartella di sola lettura?)'))
       return false
     }
@@ -522,7 +573,7 @@ Item {
     projectDialog.close()
     layerDialog.close()
     if (!iface.loadFile(projPath, name.trim())) {
-      iface.logMessage('[createlayer] apertura progetto fallita: ' + projPath)
+      logDebug('apertura progetto fallita: ' + projPath)
       toast(qsTr('Progetto creato in %1 ma apertura automatica fallita: aprilo dai file locali di QField').arg(projPath))
       return true
     }
@@ -542,11 +593,29 @@ Item {
 
   function startDigitizing(idx) {
     const lyr = layerIndex[idx]
-    activeCollection = readJsonFile(layerPath(lyr), null)
-    if (!activeCollection) {
-      toast(qsTr('Impossibile leggere il file del layer'))
-      return
+    const path = layerPath(lyr)
+    let collection = readJsonFile(path, null)
+    if (!collection) {
+      const exists = FileUtils.fileExists(path)
+      const contentLength = exists ? toStr(FileUtils.readFileContent(path)).length : -1
+      logDebug('lettura layer fallita: ' + path + ' (exists=' + exists
+               + ', byte letti=' + contentLength + ', featureCount=' + lyr.featureCount + ')')
+      if (!lyr.featureCount) {
+        // Il layer non contiene ancora dati: si riparte da una raccolta
+        // vuota invece di bloccare la digitalizzazione
+        collection = {
+          'type': 'FeatureCollection',
+          'name': lyr.name,
+          'crs': { 'type': 'name', 'properties': { 'name': 'urn:ogc:def:crs:OGC:1.3:CRS84' } },
+          'features': []
+        }
+        toast(qsTr('File del layer non leggibile: verrà ricreato al primo salvataggio'))
+      } else {
+        toast(qsTr('Impossibile leggere il file del layer (%1 geometrie presenti): dettagli nel registro messaggi di QField').arg(lyr.featureCount))
+        return
+      }
     }
+    activeCollection = collection
     activeLayerIdx = idx
     pendingVertices = []
     layerDialog.close()
@@ -647,6 +716,38 @@ Item {
     pendingGeometry = null
     pendingVertices = []
     toast(qsTr('Geometria salvata in "%1" (%2 totali)').arg(lyr.name).arg(lyr.featureCount))
+  }
+
+  // ---------------------------------------------------------------------
+  // Diagnostica
+  // ---------------------------------------------------------------------
+
+  function diagnosticsReport() {
+    const lines = []
+    lines.push('plugin: Create Layer')
+    lines.push('projectFile: ' + projectFilePath())
+    lines.push('homePath: ' + homePath())
+    lines.push('canEditProject: ' + canEditProject())
+    lines.push('isPluginProject: ' + isPluginProject())
+    lines.push('layersDir: ' + layersDir())
+    const projPath = projectFilePath()
+    if (projPath !== '') {
+      lines.push('project exists: ' + FileUtils.fileExists(projPath))
+      lines.push('project read: ' + toStr(FileUtils.readFileContent(projPath)).length + ' byte')
+    }
+    lines.push('index exists: ' + FileUtils.fileExists(indexPath()))
+    lines.push('index read: ' + toStr(FileUtils.readFileContent(indexPath())).length + ' byte')
+    lines.push('layer nell\'indice: ' + layerIndex.length)
+    for (let i = 0; i < layerIndex.length; i++) {
+      const lyr = layerIndex[i]
+      const path = layerPath(lyr)
+      lines.push('- ' + lyr.name + ' [' + lyr.geometry + ']'
+                 + ' inProject=' + (lyr.inProject === true)
+                 + ' featureCount=' + lyr.featureCount
+                 + ' exists=' + FileUtils.fileExists(path)
+                 + ' read=' + toStr(FileUtils.readFileContent(path)).length + ' byte')
+    }
+    return lines.join('\n')
   }
 
   // ---------------------------------------------------------------------
@@ -841,9 +942,9 @@ Item {
 
           ComboBox {
             id: fieldTypeCombo
-            Layout.preferredWidth: 110
-            model: [qsTr('Testo'), qsTr('Numero'), qsTr('Data')]
-            property var fieldTypes: ['string', 'number', 'date']
+            Layout.preferredWidth: 150
+            model: [qsTr('Testo'), qsTr('Numero intero'), qsTr('Numero decimale'), qsTr('Data')]
+            property var fieldTypes: ['string', 'integer', 'number', 'date']
           }
 
           Button {
@@ -943,6 +1044,14 @@ Item {
             text: qsTr('Esporta tutti')
             enabled: plugin.layerIndex.length > 0
             onClicked: plugin.exportAll()
+          }
+
+          Button {
+            text: qsTr('Diagnostica')
+            onClicked: {
+              diagnosticsDialog.report = plugin.diagnosticsReport()
+              diagnosticsDialog.open()
+            }
           }
         }
 
@@ -1068,6 +1177,53 @@ Item {
   }
 
   // ---------------------------------------------------------------------
+  // Dialogo diagnostica
+  // ---------------------------------------------------------------------
+
+  Dialog {
+    id: diagnosticsDialog
+    parent: mainWindow.contentItem
+    modal: true
+    title: qsTr('Diagnostica')
+    implicitWidth: Math.min(mainWindow.width - 40, 500)
+    implicitHeight: Math.min(mainWindow.height - 80, 560)
+    x: (mainWindow.width - width) / 2
+    y: (mainWindow.height - height) / 2
+    standardButtons: Dialog.Close
+
+    property string report: ''
+
+    contentItem: ColumnLayout {
+      spacing: 6
+
+      Flickable {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        clip: true
+        contentHeight: reportLabel.height
+        ScrollBar.vertical: ScrollBar {}
+
+        Label {
+          id: reportLabel
+          width: parent.width
+          text: diagnosticsDialog.report
+          wrapMode: Text.WrapAnywhere
+          font.pointSize: Theme.tinyFont.pointSize
+        }
+      }
+
+      Button {
+        Layout.fillWidth: true
+        text: qsTr('Copia negli appunti')
+        onClicked: {
+          platformUtilities.copyTextToClipboard(diagnosticsDialog.report)
+          plugin.toast(qsTr('Diagnostica copiata negli appunti'))
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Conferma eliminazione
   // ---------------------------------------------------------------------
 
@@ -1150,7 +1306,7 @@ Item {
           TextField {
             id: valueField
             Layout.fillWidth: true
-            inputMethodHints: modelData.type === 'number'
+            inputMethodHints: (modelData.type === 'number' || modelData.type === 'integer')
                               ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
             placeholderText: modelData.type === 'date' ? 'YYYY-MM-DD' : ''
           }
@@ -1176,6 +1332,9 @@ Item {
         let value = item.fieldValue.trim()
         if (value === '') {
           properties[item.fieldName] = null
+        } else if (item.fieldType === 'integer') {
+          const num = parseInt(value, 10)
+          properties[item.fieldName] = isNaN(num) ? null : num
         } else if (item.fieldType === 'number') {
           const num = parseFloat(value.replace(',', '.'))
           properties[item.fieldName] = isNaN(num) ? null : num
