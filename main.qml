@@ -99,14 +99,31 @@ Item {
     if (typeof content === 'string')
       return content
     try {
-      // Decodifica a blocchi: molto più veloce del ciclo per singolo byte
-      // sui file di progetto di grandi dimensioni
       const view = new Uint8Array(content)
-      const chunkSize = 8192
-      const parts = []
-      for (let i = 0; i < view.length; i += chunkSize)
-        parts.push(String.fromCharCode.apply(null, view.subarray(i, Math.min(i + chunkSize, view.length))))
-      const s = parts.join('')
+      let s = ''
+      try {
+        // Decodifica a blocchi: veloce sui file di grandi dimensioni
+        const chunkSize = 8192
+        const parts = []
+        for (let i = 0; i < view.length; i += chunkSize)
+          parts.push(String.fromCharCode.apply(null, view.subarray(i, Math.min(i + chunkSize, view.length))))
+        s = parts.join('')
+      } catch (applyError) {
+        // Ripiego per motori JS che non accettano TypedArray in apply()
+        s = ''
+        for (let i = 0; i < view.length; i++)
+          s += String.fromCharCode(view[i])
+      }
+      // I caratteri ASCII puri non richiedono la riconversione UTF-8
+      let hasHighByte = false
+      for (let i = 0; i < s.length; i++) {
+        if (s.charCodeAt(i) > 127) {
+          hasHighByte = true
+          break
+        }
+      }
+      if (!hasHighByte)
+        return s
       try {
         // Riconversione UTF-8 dei caratteri multibyte
         return decodeURIComponent(escape(s))
@@ -119,11 +136,16 @@ Item {
   }
 
   function readJsonFile(path, fallback) {
-    if (!FileUtils.fileExists(path))
+    if (!FileUtils.fileExists(path)) {
+      logDebug('file non trovato: ' + path)
       return fallback
+    }
+    const raw = toStr(FileUtils.readFileContent(path))
     try {
-      return JSON.parse(toStr(FileUtils.readFileContent(path)))
+      return JSON.parse(raw)
     } catch (e) {
+      logDebug('parse JSON fallito per ' + path + ': ' + e
+               + ' | primi 120 caratteri: ' + raw.slice(0, 120))
       return fallback
     }
   }
@@ -147,7 +169,13 @@ Item {
       return false
     }
     platformUtilities.createDir(homePath(), layersDirName)
-    layerIndex = readJsonFile(indexPath(), [])
+    const parsed = readJsonFile(indexPath(), [])
+    if (!Array.isArray(parsed)) {
+      logDebug('indice non valido (non è un array): ' + indexPath())
+      layerIndex = []
+    } else {
+      layerIndex = parsed
+    }
     return true
   }
 
@@ -736,8 +764,17 @@ Item {
       lines.push('project read: ' + toStr(FileUtils.readFileContent(projPath)).length + ' byte')
     }
     lines.push('index exists: ' + FileUtils.fileExists(indexPath()))
-    lines.push('index read: ' + toStr(FileUtils.readFileContent(indexPath())).length + ' byte')
-    lines.push('layer nell\'indice: ' + layerIndex.length)
+    const idxRaw = toStr(FileUtils.readFileContent(indexPath()))
+    lines.push('index read: ' + idxRaw.length + ' byte')
+    try {
+      const parsed = JSON.parse(idxRaw)
+      lines.push('index parse: OK, isArray=' + Array.isArray(parsed)
+                 + ', voci=' + (parsed && parsed.length !== undefined ? parsed.length : 'n/d'))
+    } catch (e) {
+      lines.push('index parse: ERRORE ' + e)
+    }
+    lines.push('index contenuto (primi 200): ' + idxRaw.slice(0, 200))
+    lines.push('layer nell\'indice (in memoria): ' + layerIndex.length)
     for (let i = 0; i < layerIndex.length; i++) {
       const lyr = layerIndex[i]
       const path = layerPath(lyr)
