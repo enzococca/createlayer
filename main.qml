@@ -690,31 +690,59 @@ Item {
         + '    </spatialrefsys>'
   }
 
+  // Blocco CRS EPSG:3857 (Web Mercator): CRS nativo delle tile OSM. Usarlo
+  // come CRS del progetto evita la rideformazione delle tile a ogni
+  // ridisegno (che causava il disallineamento visivo dei vettori)
+  function crsBlock3857() {
+    return '<spatialrefsys nativeFormat="Wkt">\n'
+        + '      <proj4>+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs</proj4>\n'
+        + '      <srsid>3857</srsid>\n'
+        + '      <srid>3857</srid>\n'
+        + '      <authid>EPSG:3857</authid>\n'
+        + '      <description>WGS 84 / Pseudo-Mercator</description>\n'
+        + '      <projectionacronym>merc</projectionacronym>\n'
+        + '      <ellipsoidacronym>EPSG:7059</ellipsoidacronym>\n'
+        + '      <geographicflag>false</geographicflag>\n'
+        + '    </spatialrefsys>'
+  }
+
+  function lonLatToWebMercator(lon, lat) {
+    const R = 6378137.0
+    const clampedLat = Math.max(-85.06, Math.min(85.06, lat))
+    return {
+      'x': lon * Math.PI / 180 * R,
+      'y': Math.log(Math.tan(Math.PI / 4 + clampedLat * Math.PI / 360)) * R
+    }
+  }
+
   function projectTemplate(name, ext, indexJson) {
     const savedIndex = indexJson || '[]'
-    // Progetto minimale in EPSG:4326 con sfondo OpenStreetMap (XYZ)
+    // Estensione della vista convertita da gradi a metri Web Mercator
+    const min = lonLatToWebMercator(ext.xmin, ext.ymin)
+    const max = lonLatToWebMercator(ext.xmax, ext.ymax)
+    // Progetto minimale in EPSG:3857 con sfondo OpenStreetMap (XYZ)
     const osmSource = 'crs=EPSG:3857&format&type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0'
     return '<!DOCTYPE qgis PUBLIC \'http://mrcc.com/qgis.dtd\' \'SYSTEM\'>\n'
         + '<qgis projectname="' + xmlEscape(name) + '" version="3.34.0-Prizren">\n'
         + '  <title>' + xmlEscape(name) + '</title>\n'
         + '  <projectCrs>\n'
-        + '    ' + crsBlockWgs84() + '\n'
+        + '    ' + crsBlock3857() + '\n'
         + '  </projectCrs>\n'
         + '  <layer-tree-group>\n'
         + '    <layer-tree-layer id="osm_basemap" name="OpenStreetMap" source="' + xmlEscape(osmSource)
         + '" providerKey="wms" checked="Qt::Checked" expanded="1"/>\n'
         + '  </layer-tree-group>\n'
         + '  <mapcanvas annotationsVisible="1" name="theMapCanvas">\n'
-        + '    <units>degrees</units>\n'
+        + '    <units>meters</units>\n'
         + '    <extent>\n'
-        + '      <xmin>' + ext.xmin + '</xmin>\n'
-        + '      <ymin>' + ext.ymin + '</ymin>\n'
-        + '      <xmax>' + ext.xmax + '</xmax>\n'
-        + '      <ymax>' + ext.ymax + '</ymax>\n'
+        + '      <xmin>' + min.x + '</xmin>\n'
+        + '      <ymin>' + min.y + '</ymin>\n'
+        + '      <xmax>' + max.x + '</xmax>\n'
+        + '      <ymax>' + max.y + '</ymax>\n'
         + '    </extent>\n'
         + '    <rotation>0</rotation>\n'
         + '    <destinationsrs>\n'
-        + '      ' + crsBlockWgs84() + '\n'
+        + '      ' + crsBlock3857() + '\n'
         + '    </destinationsrs>\n'
         + '  </mapcanvas>\n'
         + '  <projectlayers>\n'
@@ -972,7 +1000,7 @@ Item {
 
   function diagnosticsReport() {
     const lines = []
-    lines.push('plugin: Create Layer 1.8.0')
+    lines.push('plugin: Create Layer 1.9.0')
     ensureIo()
     lines.push('io: scrittura=' + writeMode + ', lettura=' + readMode
                + (ioDetail !== '' ? ' (' + ioDetail + ')' : ''))

@@ -3,38 +3,38 @@
   <title>Progetto CreateLayer</title>
   <projectCrs>
     <spatialrefsys nativeFormat="Wkt">
-      <proj4>+proj=longlat +datum=WGS84 +no_defs</proj4>
-      <srsid>3452</srsid>
-      <srid>4326</srid>
-      <authid>EPSG:4326</authid>
-      <description>WGS 84</description>
-      <projectionacronym>longlat</projectionacronym>
-      <ellipsoidacronym>EPSG:7030</ellipsoidacronym>
-      <geographicflag>true</geographicflag>
+      <proj4>+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs</proj4>
+      <srsid>3857</srsid>
+      <srid>3857</srid>
+      <authid>EPSG:3857</authid>
+      <description>WGS 84 / Pseudo-Mercator</description>
+      <projectionacronym>merc</projectionacronym>
+      <ellipsoidacronym>EPSG:7059</ellipsoidacronym>
+      <geographicflag>false</geographicflag>
     </spatialrefsys>
   </projectCrs>
   <layer-tree-group>
     <layer-tree-layer id="osm_basemap" name="OpenStreetMap" source="crs=EPSG:3857&amp;format&amp;type=xyz&amp;url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&amp;zmax=19&amp;zmin=0" providerKey="wms" checked="Qt::Checked" expanded="1"/>
   </layer-tree-group>
   <mapcanvas annotationsVisible="1" name="theMapCanvas">
-    <units>degrees</units>
+    <units>meters</units>
     <extent>
-      <xmin>-180</xmin>
-      <ymin>-60</ymin>
-      <xmax>180</xmax>
-      <ymax>75</ymax>
+      <xmin>-20037508.342789244</xmin>
+      <ymin>-8399737.88981836</ymin>
+      <xmax>20037508.342789244</xmax>
+      <ymax>12932243.111992031</ymax>
     </extent>
     <rotation>0</rotation>
     <destinationsrs>
       <spatialrefsys nativeFormat="Wkt">
-      <proj4>+proj=longlat +datum=WGS84 +no_defs</proj4>
-      <srsid>3452</srsid>
-      <srid>4326</srid>
-      <authid>EPSG:4326</authid>
-      <description>WGS 84</description>
-      <projectionacronym>longlat</projectionacronym>
-      <ellipsoidacronym>EPSG:7030</ellipsoidacronym>
-      <geographicflag>true</geographicflag>
+      <proj4>+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs</proj4>
+      <srsid>3857</srsid>
+      <srid>3857</srid>
+      <authid>EPSG:3857</authid>
+      <description>WGS 84 / Pseudo-Mercator</description>
+      <projectionacronym>merc</projectionacronym>
+      <ellipsoidacronym>EPSG:7059</ellipsoidacronym>
+      <geographicflag>false</geographicflag>
     </spatialrefsys>
     </destinationsrs>
   </mapcanvas>
@@ -49,4 +49,14 @@
   <layerorder>
     <layer id="osm_basemap"/>
   </layerorder>
+  <properties>
+    <Variables>
+      <variableNames type="QStringList">
+        <value>createlayer_index</value>
+      </variableNames>
+      <variableValues type="QStringList">
+        <value>[]</value>
+      </variableValues>
+    </Variables>
+  </properties>
 </qgis>
