@@ -310,6 +310,22 @@ Item {
   // Gestione indice layer
   // ---------------------------------------------------------------------
 
+  // Legge l'indice dalla variabile di progetto createlayer_index: le
+  // variabili vengono lette dal motore C++ di QGIS e arrivano come
+  // stringhe pure, quindi funzionano anche con il ponte di lettura rotto
+  function indexFromProjectVariable() {
+    try {
+      const vars = ExpressionContextUtils.projectVariables(qgisProject)
+      if (vars && vars.createlayer_index !== undefined && vars.createlayer_index !== null) {
+        const parsed = JSON.parse('' + vars.createlayer_index)
+        if (Array.isArray(parsed))
+          return parsed
+      }
+    } catch (e) {
+    }
+    return null
+  }
+
   function loadIndex() {
     if (homePath() === '') {
       layerIndex = []
@@ -317,18 +333,26 @@ Item {
     }
     platformUtilities.createDir(homePath(), layersDirName)
     ensureIo()
-    const parsed = readJsonFile(indexPath(), [])
+    let parsed = readJsonFile(indexPath(), null)
     if (!Array.isArray(parsed)) {
-      logDebug('indice non valido (non è un array): ' + indexPath())
-      layerIndex = []
-    } else {
-      layerIndex = parsed
+      // Ripiego: variabile di progetto (persistita nei progetti del plugin)
+      parsed = indexFromProjectVariable()
+      if (parsed !== null)
+        logDebug('indice caricato dalla variabile di progetto (' + parsed.length + ' layer)')
     }
+    layerIndex = Array.isArray(parsed) ? parsed : []
     return true
   }
 
   function saveIndex() {
     writeText(indexPath(), JSON.stringify(layerIndex, null, 2))
+    // Copia in memoria nella variabile di progetto (per i progetti del
+    // plugin viene persistita alla successiva riscrittura del .qgs)
+    try {
+      ExpressionContextUtils.setProjectVariable(qgisProject, 'createlayer_index',
+                                                JSON.stringify(layerIndex))
+    } catch (e) {
+    }
     // Riassegnazione per forzare l'aggiornamento delle viste QML
     layerIndex = layerIndex.slice()
   }
@@ -465,11 +489,15 @@ Item {
     const lyr = layerIndex[idx]
     if (activeLayerIdx === idx)
       stopDigitizing()
-    if (lyr.inProject && canEditProject())
-      removeLayerFromProject(lyr)
     platformUtilities.rmFile(layerPath(lyr))
     layerIndex.splice(idx, 1)
     saveIndex()
+    if (lyr.inProject && canEditProject()) {
+      if (isPluginProject())
+        writePluginProject(layerIndex)
+      else
+        removeLayerFromProject(lyr)
+    }
     if (lyr.inProject) {
       layerDialog.close()
       iface.reloadProject()
@@ -511,32 +539,48 @@ Item {
     return { 'xmin': -180, 'ymin': -60, 'xmax': 180, 'ymax': 75 }
   }
 
+  // Riscrive da zero un progetto generato dal plugin: template + tutti i
+  // layer registrati + indice salvato come variabile di progetto. Non
+  // richiede letture (funziona anche con il ponte di lettura difettoso).
+  function writePluginProject(allLayers) {
+    const path = projectFilePath()
+    const projName = FileUtils.fileName(path).replace(/\.qgs$/i, '')
+    let xml = projectTemplate(projName, currentViewExtentWgs84(), JSON.stringify(allLayers))
+    for (let i = 0; i < allLayers.length; i++) {
+      if (allLayers[i].inProject) {
+        const injected = injectLayerXml(xml, allLayers[i])
+        if (injected)
+          xml = injected
+      }
+    }
+    if (!writeText(path, xml)) {
+      logDebug('scrittura progetto fallita: ' + path)
+      return false
+    }
+    return true
+  }
+
   function addLayerToProject(lyr) {
     const path = projectFilePath()
+
+    // Progetti generati dal plugin: sempre ricostruiti da zero, così non
+    // servono letture e l'indice resta salvato nel progetto stesso
+    if (isPluginProject()) {
+      const all = layerIndex.slice()
+      all.push(Object.assign({}, lyr, { 'inProject': true }))
+      return writePluginProject(all)
+    }
+
     let xml = readText(path)
     // Un progetto valido deve contenere la radice <qgis>: contenuto vuoto o
-    // corrotto (es. file scritto con il ponte stringa difettoso) non lo è
+    // corrotto non lo è
     if (xml.indexOf('<qgis') < 0) {
       logDebug('lettura progetto fallita, vuota o corrotta: ' + path
                + ' (byte letti=' + xml.length + ')')
-      if (!isPluginProject())
-        return false
-      // Progetto generato dal plugin: ricostruito da zero dal template,
-      // reinserendo i layer già registrati (modalità solo scrittura)
-      let projName = FileUtils.fileName(path).replace(/\.qgs$/i, '')
-      xml = projectTemplate(projName, currentViewExtentWgs84())
-      for (let i = 0; i < layerIndex.length; i++) {
-        if (layerIndex[i].inProject) {
-          const reinjected = injectLayerXml(xml, layerIndex[i])
-          if (reinjected)
-            xml = reinjected
-        }
-      }
-      logDebug('progetto rigenerato dal template: ' + path)
-    } else {
-      // Backup del progetto prima di modificarlo
-      writeText(path + '.createlayer.bak', xml)
+      return false
     }
+    // Backup del progetto prima di modificarlo
+    writeText(path + '.createlayer.bak', xml)
 
     const result = injectLayerXml(xml, lyr)
     if (result === null) {
@@ -560,11 +604,16 @@ Item {
 
     const source = layerSource(lyr)
 
+    // Il blocco <srs> esplicito evita un CRS di layer invalido (che in
+    // QField produce geometrie renderizzate in posizioni instabili)
     const maplayer = '\n    <maplayer type="vector" geometry="' + geometryAttr(lyr.geometry)
         + '" autoRefreshEnabled="0" readOnly="0" refreshOnNotifyEnabled="0">\n'
         + '      <id>' + lyr.layerId + '</id>\n'
         + '      <datasource>' + xmlEscape(source) + '</datasource>\n'
         + '      <layername>' + xmlEscape(lyr.name) + '</layername>\n'
+        + '      <srs>\n'
+        + '        ' + crsBlockWgs84() + '\n'
+        + '      </srs>\n'
         + '      <provider encoding="UTF-8">ogr</provider>\n'
         + '    </maplayer>\n  '
 
@@ -641,7 +690,8 @@ Item {
         + '    </spatialrefsys>'
   }
 
-  function projectTemplate(name, ext) {
+  function projectTemplate(name, ext, indexJson) {
+    const savedIndex = indexJson || '[]'
     // Progetto minimale in EPSG:4326 con sfondo OpenStreetMap (XYZ)
     const osmSource = 'crs=EPSG:3857&format&type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0'
     return '<!DOCTYPE qgis PUBLIC \'http://mrcc.com/qgis.dtd\' \'SYSTEM\'>\n'
@@ -678,6 +728,16 @@ Item {
         + '  <layerorder>\n'
         + '    <layer id="osm_basemap"/>\n'
         + '  </layerorder>\n'
+        + '  <properties>\n'
+        + '    <Variables>\n'
+        + '      <variableNames type="QStringList">\n'
+        + '        <value>createlayer_index</value>\n'
+        + '      </variableNames>\n'
+        + '      <variableValues type="QStringList">\n'
+        + '        <value>' + xmlEscape(savedIndex) + '</value>\n'
+        + '      </variableValues>\n'
+        + '    </Variables>\n'
+        + '  </properties>\n'
         + '</qgis>\n'
   }
 
@@ -779,7 +839,16 @@ Item {
       const contentLength = exists ? readText(path).length : -1
       logDebug('lettura layer fallita: ' + path + ' (exists=' + exists
                + ', byte letti=' + contentLength + ', featureCount=' + lyr.featureCount + ')')
-      if (!lyr.featureCount) {
+      // Un file più grande di una raccolta vuota potrebbe contenere dati
+      // non ancora conteggiati: meglio non sovrascriverlo
+      let fileSize = 0
+      try {
+        const info = FileUtils.getFileInfo(path)
+        if (info && info.fileSize !== undefined)
+          fileSize = Number(info.fileSize) || 0
+      } catch (e) {
+      }
+      if (!lyr.featureCount && (!exists || fileSize <= 220)) {
         // Il layer non contiene ancora dati: si riparte da una raccolta
         // vuota invece di bloccare la digitalizzazione
         collection = {
@@ -903,7 +972,7 @@ Item {
 
   function diagnosticsReport() {
     const lines = []
-    lines.push('plugin: Create Layer 1.7.0')
+    lines.push('plugin: Create Layer 1.8.0')
     ensureIo()
     lines.push('io: scrittura=' + writeMode + ', lettura=' + readMode
                + (ioDetail !== '' ? ' (' + ioDetail + ')' : ''))
@@ -928,6 +997,9 @@ Item {
       lines.push('index parse: ERRORE ' + e)
     }
     lines.push('index contenuto (primi 200): ' + idxRaw.slice(0, 200))
+    const varIndex = indexFromProjectVariable()
+    lines.push('index da variabile progetto: '
+               + (varIndex === null ? 'assente/illeggibile' : varIndex.length + ' layer'))
     lines.push('layer nell\'indice (in memoria): ' + layerIndex.length)
     for (let i = 0; i < layerIndex.length; i++) {
       const lyr = layerIndex[i]
