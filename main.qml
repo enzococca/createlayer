@@ -162,24 +162,37 @@ Item {
     return s === '' ? 'layer' : s
   }
 
-  function parseFields(spec) {
-    // Formato: "nome:string, altezza:number, rilievo:date"
-    const fields = []
-    const parts = spec.split(',')
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i].trim()
-      if (p === '')
-        continue
-      const bits = p.split(':')
-      const fname = bits[0].trim()
-      if (fname === '')
-        continue
-      let ftype = bits.length > 1 ? bits[1].trim().toLowerCase() : 'string'
-      if (ftype !== 'string' && ftype !== 'number' && ftype !== 'date')
-        ftype = 'string'
-      fields.push({ name: fname, type: ftype })
+  // Campi in preparazione per il nuovo layer: [{name, type}]
+  property var newFields: []
+
+  function typeLabel(ftype) {
+    if (ftype === 'number') return qsTr('Numero')
+    if (ftype === 'date') return qsTr('Data')
+    return qsTr('Testo')
+  }
+
+  function addNewField(name, ftype) {
+    const fname = name.trim()
+    if (fname === '') {
+      toast(qsTr('Inserisci il nome del campo'))
+      return false
     }
-    return fields
+    for (let i = 0; i < newFields.length; i++) {
+      if (newFields[i].name.toLowerCase() === fname.toLowerCase()) {
+        toast(qsTr('Esiste già un campo "%1"').arg(fname))
+        return false
+      }
+    }
+    const fields = newFields.slice()
+    fields.push({ 'name': fname, 'type': ftype })
+    newFields = fields
+    return true
+  }
+
+  function removeNewField(idx) {
+    const fields = newFields.slice()
+    fields.splice(idx, 1)
+    newFields = fields
   }
 
   // Feature "di esempio" senza geometria: serve a definire i tipi dei campi
@@ -197,7 +210,7 @@ Item {
     return { 'type': 'Feature', 'properties': props, 'geometry': null }
   }
 
-  function createLayer(name, geomType, fieldsSpec) {
+  function createLayer(name, geomType, fields) {
     if (!loadIndex()) {
       toast(qsTr('Nessun progetto caricato: apri un progetto prima di creare layer'))
       return false
@@ -215,7 +228,6 @@ Item {
       counter++
     }
 
-    const fields = parseFields(fieldsSpec)
     const inTocMode = canEditProject()
     // La riga di esempio (senza geometria) serve solo quando il layer viene
     // aperto dal provider OGR di QGIS: definisce i tipi dei campi
@@ -812,18 +824,69 @@ Item {
           property var geometryTypes: ['Point', 'LineString', 'Polygon']
         }
 
-        TextField {
-          id: fieldsField
+        Label {
+          text: qsTr('Campi del layer')
+          font.bold: true
+        }
+
+        RowLayout {
           Layout.fillWidth: true
-          placeholderText: qsTr('Campi: nome:string, altezza:number, data:date')
+          spacing: 6
+
+          TextField {
+            id: fieldNameField
+            Layout.fillWidth: true
+            placeholderText: qsTr('Nome del campo')
+          }
+
+          ComboBox {
+            id: fieldTypeCombo
+            Layout.preferredWidth: 110
+            model: [qsTr('Testo'), qsTr('Numero'), qsTr('Data')]
+            property var fieldTypes: ['string', 'number', 'date']
+          }
+
+          Button {
+            text: qsTr('Aggiungi')
+            onClicked: {
+              if (plugin.addNewField(fieldNameField.text,
+                                     fieldTypeCombo.fieldTypes[fieldTypeCombo.currentIndex])) {
+                fieldNameField.text = ''
+              }
+            }
+          }
         }
 
         Label {
+          visible: plugin.newFields.length === 0
           Layout.fillWidth: true
-          text: qsTr('Tipi supportati: string, number, date. Lasciare vuoto per un layer senza attributi.')
+          text: qsTr('Nessun campo aggiunto: il layer verrà creato senza attributi.')
           wrapMode: Text.WordWrap
           font.pointSize: Theme.tinyFont.pointSize
           color: Theme.secondaryTextColor
+        }
+
+        Repeater {
+          model: plugin.newFields
+
+          delegate: RowLayout {
+            required property var modelData
+            required property int index
+
+            Layout.fillWidth: true
+            spacing: 6
+
+            Label {
+              Layout.fillWidth: true
+              text: '• ' + modelData.name + ' — ' + plugin.typeLabel(modelData.type)
+              elide: Text.ElideRight
+            }
+
+            Button {
+              text: qsTr('Rimuovi')
+              onClicked: plugin.removeNewField(index)
+            }
+          }
         }
 
         Label {
@@ -851,9 +914,10 @@ Item {
           onClicked: {
             if (plugin.createLayer(nameField.text,
                                    geometryCombo.geometryTypes[geometryCombo.currentIndex],
-                                   fieldsField.text)) {
+                                   plugin.newFields)) {
               nameField.text = ''
-              fieldsField.text = ''
+              fieldNameField.text = ''
+              plugin.newFields = []
             }
           }
         }

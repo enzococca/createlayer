@@ -19,7 +19,8 @@ raccolti, senza dover tornare in QGIS desktop.
 
   I layer creati al suo interno compaiono in legenda.
 - **Creazione layer sul campo**: nome, tipo di geometria (punto, linea,
-  poligono) e campi attributo personalizzati (`string`, `number`, `date`).
+  poligono) e campi attributo personalizzati aggiunti uno alla volta con
+  nome + tipo (Testo, Numero, Data) da un'interfaccia guidata.
   I layer sono salvati come **GeoJSON (EPSG:4326)** nella sottocartella
   `qfield_layers/` del progetto corrente.
 - **Layer nella legenda (TOC)**: se il progetto aperto è un file **`.qgs`**,
@@ -68,9 +69,10 @@ https://github.com/enzococca/createlayer/raw/main/createlayer.zip
 1. Tocca il pulsante del plugin nella toolbar. Puoi partire da un progetto
    già aperto oppure crearne uno nuovo con **Nuovo progetto…** (viene
    generato un `.qgs` con sfondo OpenStreetMap e aperto subito).
-2. **Nuovo layer**: inserisci nome, tipo di geometria e (opzionale) i campi
-   nel formato `nome:string, altezza:number, data:date`, poi premi
-   **Crea layer**.
+2. **Nuovo layer**: inserisci il nome e il tipo di geometria; per ogni
+   campo attributo (opzionale) scrivi il nome, scegli il tipo (Testo,
+   Numero, Data) e premi **Aggiungi** — i campi aggiunti compaiono in
+   elenco e si possono rimuovere. Infine premi **Crea layer**.
 3. **Progetti `.qgs`**: il layer viene aggiunto alla legenda e il progetto
    ricaricato. Selezionalo nella legenda e digitalizza con gli strumenti
    normali di QField (pulsante **+**). Se il layer ha dei campi, contiene
