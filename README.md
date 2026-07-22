@@ -1,0 +1,105 @@
+# Create Layer — Plugin QField
+
+Plugin per **QField** (≥ 3.2) che permette di **creare nuovi layer direttamente
+sul campo**, digitalizzare geometrie ed **esportare/condividere** i dati
+raccolti, senza dover tornare in QGIS desktop.
+
+## Funzionalità
+
+- **Creazione layer sul campo**: nome, tipo di geometria (punto, linea,
+  poligono) e campi attributo personalizzati (`string`, `number`, `date`).
+  I layer sono salvati come **GeoJSON (EPSG:4326)** nella sottocartella
+  `qfield_layers/` del progetto corrente.
+- **Digitalizzazione**:
+  - punti/vertici acquisiti dalla **posizione GPS** o dal **centro mappa**
+    (mirino a schermo);
+  - per linee e poligoni: aggiunta progressiva dei vertici, annullamento
+    dell'ultimo vertice, chiusura della geometria;
+  - compilazione degli attributi a ogni geometria salvata.
+- **Esportazione**:
+  - **Esporta**: salva il singolo GeoJSON in una posizione scelta dall'utente
+    (dialogo di sistema, Android/iOS);
+  - **Condividi**: invia il GeoJSON tramite le app di condivisione del
+    dispositivo (email, Telegram, Drive, ecc.);
+  - **CSV**: genera ed esporta una tabella CSV con geometria WKT e attributi;
+  - **Esporta tutti**: comprime l'intera cartella `qfield_layers/` e la
+    condivide come archivio.
+
+## Installazione
+
+### Da URL (consigliato)
+
+In QField: **Impostazioni → Plugin → Installa plugin da URL** e incolla:
+
+```
+https://github.com/enzococca/createlayer/raw/main/createlayer.zip
+```
+
+### Da ZIP
+
+1. Scarica [`createlayer.zip`](https://github.com/enzococca/createlayer/raw/main/createlayer.zip)
+   (oppure generalo con `python package.py`).
+2. Copia lo ZIP sul dispositivo, quindi in QField:
+   **Impostazioni → Plugin → Installa plugin da ZIP**.
+3. Abilita il plugin nell'elenco. Comparirà un pulsante rotondo nella toolbar
+   dei plugin (in basso a destra della mappa).
+
+## Utilizzo
+
+1. Apri un progetto in QField e tocca il pulsante del plugin nella toolbar.
+2. **Nuovo layer**: inserisci nome, tipo di geometria e (opzionale) i campi
+   nel formato `nome:string, altezza:number, data:date`, poi premi
+   **Crea layer**.
+3. **Digitalizza**: seleziona un layer e premi **Digitalizza**. Usa
+   **+ GPS** (posizione corrente) o **+ Centro** (mirino al centro mappa) per
+   aggiungere punti o vertici. Per linee/poligoni premi **Concludi** per
+   chiudere la geometria. A ogni geometria viene richiesta la compilazione
+   degli attributi.
+4. **Esporta/Condividi/CSV**: dai pulsanti accanto a ciascun layer, oppure
+   **Esporta tutti** per l'archivio compresso dell'intera cartella.
+
+## Dove finiscono i dati
+
+```
+<cartella progetto>/
+└── qfield_layers/
+    ├── index.json               # indice dei layer creati dal plugin
+    ├── alberi_abbattuti.geojson
+    ├── alberi_abbattuti.csv     # generato al momento dell'export CSV
+    └── ...
+```
+
+I GeoJSON sono in EPSG:4326 e si aprono direttamente in QGIS desktop
+(trascinandoli nel progetto).
+
+## Limitazioni note
+
+- I layer creati **non vengono aggiunti automaticamente al progetto QGIS
+  aperto in QField** (l'API dei plugin QField non lo consente): sono file
+  GeoJSON gestiti dal plugin, visibili in QGIS desktop o reimportabili nel
+  progetto in un secondo momento.
+- Le geometrie sono semplici (Point/LineString/Polygon, senza anelli interni
+  né multi-parti).
+- Serve un progetto aperto: i file vengono salvati nella cartella del
+  progetto corrente.
+
+## Struttura del repository
+
+```
+createlayer/
+├── main.qml          # logica e interfaccia del plugin
+├── metadata.txt      # metadati (nome, versione, autore)
+├── icon.svg          # icona della toolbar
+├── package.py        # genera createlayer.zip
+├── createlayer.zip   # pacchetto installabile
+└── README.md
+```
+
+## Riferimenti
+
+- Documentazione plugin QField: <https://docs.qfield.org/reference/plugins/>
+- API e snippet: <https://api.qfield.org/>
+
+## Licenza
+
+Vedi [LICENSE](LICENSE).

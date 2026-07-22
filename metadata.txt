@@ -1,0 +1,7 @@
+[general]
+name=Create Layer
+description=Crea nuovi layer GeoJSON direttamente sul campo, digitalizza punti/linee/poligoni tramite GPS o centro mappa ed esporta/condividi i dati (GeoJSON, CSV, cartella compressa).
+author=Enzo Cocca
+icon=icon.svg
+version=1.0.0
+homepage=https://github.com/enzococca/createlayer
