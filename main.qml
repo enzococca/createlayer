@@ -89,6 +89,14 @@ Item {
     iface.logMessage('[createlayer] ' + message)
   }
 
+  // Ultimo errore interno significativo (mostrato in Diagnostica)
+  property string lastError: ''
+
+  function setError(message) {
+    lastError = message
+    logDebug('ERRORE: ' + message)
+  }
+
   // ---------------------------------------------------------------------
   // Self-test di scrittura/lettura: su alcune build (es. iOS) la
   // conversione stringa <-> QByteArray è difettosa; il plugin verifica al
@@ -476,7 +484,7 @@ Item {
       // Niente TOC: la riga di esempio non serve nella modalità integrata
       collection.features = []
       writeText(layersDir() + '/' + file, JSON.stringify(collection))
-      toast(qsTr('Impossibile registrare il layer nel progetto: uso la modalità integrata'))
+      toast(qsTr('Impossibile registrare il layer nel progetto (%1): uso la modalità integrata').arg(lastError))
     }
 
     layerIndex.push(lyr)
@@ -543,21 +551,31 @@ Item {
   // layer registrati + indice salvato come variabile di progetto. Non
   // richiede letture (funziona anche con il ponte di lettura difettoso).
   function writePluginProject(allLayers) {
-    const path = projectFilePath()
-    const projName = FileUtils.fileName(path).replace(/\.qgs$/i, '')
-    let xml = projectTemplate(projName, currentViewExtentWgs84(), JSON.stringify(allLayers))
-    for (let i = 0; i < allLayers.length; i++) {
-      if (allLayers[i].inProject) {
-        const injected = injectLayerXml(xml, allLayers[i])
-        if (injected)
+    try {
+      const path = projectFilePath()
+      const projName = FileUtils.fileName(path).replace(/\.qgs$/i, '')
+      let xml = projectTemplate(projName, currentViewExtentWgs84(), JSON.stringify(allLayers))
+      for (let i = 0; i < allLayers.length; i++) {
+        if (allLayers[i].inProject) {
+          const injected = injectLayerXml(xml, allLayers[i])
+          if (injected === null) {
+            setError('iniezione layer "' + allLayers[i].name + '" fallita nel template')
+            return false
+          }
           xml = injected
+        }
       }
-    }
-    if (!writeText(path, xml)) {
-      logDebug('scrittura progetto fallita: ' + path)
+      if (!writeText(path, xml)) {
+        setError('scrittura del progetto fallita: ' + path)
+        return false
+      }
+      logDebug('progetto riscritto (' + xml.length + ' byte, '
+               + allLayers.length + ' layer): ' + path)
+      return true
+    } catch (e) {
+      setError('eccezione in writePluginProject: ' + e)
       return false
     }
-    return true
   }
 
   function addLayerToProject(lyr) {
@@ -575,7 +593,7 @@ Item {
     // Un progetto valido deve contenere la radice <qgis>: contenuto vuoto o
     // corrotto non lo è
     if (xml.indexOf('<qgis') < 0) {
-      logDebug('lettura progetto fallita, vuota o corrotta: ' + path
+      setError('lettura progetto fallita, vuota o corrotta: ' + path
                + ' (byte letti=' + xml.length + ')')
       return false
     }
@@ -584,14 +602,42 @@ Item {
 
     const result = injectLayerXml(xml, lyr)
     if (result === null) {
-      logDebug('iniezione layer fallita (struttura progetto inattesa): ' + path)
+      setError('iniezione layer fallita (struttura progetto inattesa): ' + path)
       return false
     }
     if (!writeText(path, result)) {
-      logDebug('scrittura progetto fallita: ' + path)
+      setError('scrittura progetto fallita: ' + path)
       return false
     }
     return true
+  }
+
+  // Ritenta la registrazione in legenda di un layer esistente
+  function retryAddToProject(idx) {
+    const lyr = layerIndex[idx]
+    if (!canEditProject()) {
+      toast(qsTr('Il progetto corrente non è un file .qgs modificabile'))
+      return
+    }
+    let ok
+    if (isPluginProject()) {
+      lyr.inProject = true
+      ok = writePluginProject(layerIndex)
+      if (!ok)
+        lyr.inProject = false
+    } else {
+      ok = addLayerToProject(lyr)
+      if (ok)
+        lyr.inProject = true
+    }
+    saveIndex()
+    if (!ok) {
+      toast(qsTr('Registrazione fallita: %1').arg(lastError))
+      return
+    }
+    layerDialog.close()
+    iface.reloadProject()
+    toast(qsTr('Layer "%1" aggiunto alla legenda').arg(lyr.name))
   }
 
   // Inserisce il layer nell'XML di progetto; restituisce il nuovo XML o
@@ -1000,7 +1046,7 @@ Item {
 
   function diagnosticsReport() {
     const lines = []
-    lines.push('plugin: Create Layer 1.9.0')
+    lines.push('plugin: Create Layer 1.10.0')
     ensureIo()
     lines.push('io: scrittura=' + writeMode + ', lettura=' + readMode
                + (ioDetail !== '' ? ' (' + ioDetail + ')' : ''))
@@ -1028,6 +1074,7 @@ Item {
     const varIndex = indexFromProjectVariable()
     lines.push('index da variabile progetto: '
                + (varIndex === null ? 'assente/illeggibile' : varIndex.length + ' layer'))
+    lines.push('ultimo errore: ' + (lastError !== '' ? lastError : 'nessuno'))
     lines.push('layer nell\'indice (in memoria): ' + layerIndex.length)
     for (let i = 0; i < layerIndex.length; i++) {
       const lyr = layerIndex[i]
@@ -1410,6 +1457,11 @@ Item {
                   visible: !modelData.inProject
                   text: qsTr('Digitalizza')
                   onClicked: plugin.startDigitizing(index)
+                }
+                Button {
+                  visible: !modelData.inProject
+                  text: qsTr('In legenda')
+                  onClicked: plugin.retryAddToProject(index)
                 }
                 Button {
                   text: qsTr('Esporta')
