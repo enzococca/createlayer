@@ -6,6 +6,11 @@ raccolti, senza dover tornare in QGIS desktop.
 
 ## Funzionalità
 
+- **Creazione progetto sul campo**: dal pulsante **Nuovo progetto…** il
+  plugin genera un progetto **`.qgs`** pronto all'uso (sfondo OpenStreetMap,
+  CRS EPSG:4326, centrato sulla posizione GPS se attiva) nella cartella dati
+  di QField (`createlayer_projects/`) e lo apre subito. Funziona anche senza
+  alcun progetto aperto. I layer creati al suo interno compaiono in legenda.
 - **Creazione layer sul campo**: nome, tipo di geometria (punto, linea,
   poligono) e campi attributo personalizzati (`string`, `number`, `date`).
   I layer sono salvati come **GeoJSON (EPSG:4326)** nella sottocartella
@@ -53,7 +58,9 @@ https://github.com/enzococca/createlayer/raw/main/createlayer.zip
 
 ## Utilizzo
 
-1. Apri un progetto in QField e tocca il pulsante del plugin nella toolbar.
+1. Tocca il pulsante del plugin nella toolbar. Puoi partire da un progetto
+   già aperto oppure crearne uno nuovo con **Nuovo progetto…** (viene
+   generato un `.qgs` con sfondo OpenStreetMap e aperto subito).
 2. **Nuovo layer**: inserisci nome, tipo di geometria e (opzionale) i campi
    nel formato `nome:string, altezza:number, data:date`, poi premi
    **Crea layer**.

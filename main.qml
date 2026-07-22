@@ -35,6 +35,10 @@ Item {
   // [{name, file, geometry, fields, created, featureCount, layerId, inProject}]
   property var layerIndex: []
 
+  // Percorso del progetto al momento dell'apertura del dialogo (le
+  // funzioni JS non sono reattive: aggiornato a ogni click sul pulsante)
+  property string currentProjectFile: ''
+
   // Stato della sessione di digitalizzazione (solo layer non nel progetto)
   property int activeLayerIdx: -1
   property var activeCollection: null
@@ -354,6 +358,135 @@ Item {
   }
 
   // ---------------------------------------------------------------------
+  // Creazione di un nuovo progetto .qgs
+  // ---------------------------------------------------------------------
+
+  function appDataDir() {
+    const dirs = platformUtilities.appDataDirs()
+    if (!dirs || dirs.length === 0)
+      return ''
+    let d = '' + dirs[0]
+    while (d.length > 0 && d.charAt(d.length - 1) === '/')
+      d = d.slice(0, -1)
+    return d
+  }
+
+  function crsBlockWgs84() {
+    return '<spatialrefsys nativeFormat="Wkt">\n'
+        + '      <proj4>+proj=longlat +datum=WGS84 +no_defs</proj4>\n'
+        + '      <srsid>3452</srsid>\n'
+        + '      <srid>4326</srid>\n'
+        + '      <authid>EPSG:4326</authid>\n'
+        + '      <description>WGS 84</description>\n'
+        + '      <projectionacronym>longlat</projectionacronym>\n'
+        + '      <ellipsoidacronym>EPSG:7030</ellipsoidacronym>\n'
+        + '      <geographicflag>true</geographicflag>\n'
+        + '    </spatialrefsys>'
+  }
+
+  function projectTemplate(name, ext) {
+    // Progetto minimale in EPSG:4326 con sfondo OpenStreetMap (XYZ)
+    const osmSource = 'crs=EPSG:3857&format&type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0'
+    return '<!DOCTYPE qgis PUBLIC \'http://mrcc.com/qgis.dtd\' \'SYSTEM\'>\n'
+        + '<qgis projectname="' + xmlEscape(name) + '" version="3.34.0-Prizren">\n'
+        + '  <title>' + xmlEscape(name) + '</title>\n'
+        + '  <projectCrs>\n'
+        + '    ' + crsBlockWgs84() + '\n'
+        + '  </projectCrs>\n'
+        + '  <layer-tree-group>\n'
+        + '    <layer-tree-layer id="osm_basemap" name="OpenStreetMap" source="' + xmlEscape(osmSource)
+        + '" providerKey="wms" checked="Qt::Checked" expanded="1"/>\n'
+        + '  </layer-tree-group>\n'
+        + '  <mapcanvas annotationsVisible="1" name="theMapCanvas">\n'
+        + '    <units>degrees</units>\n'
+        + '    <extent>\n'
+        + '      <xmin>' + ext.xmin + '</xmin>\n'
+        + '      <ymin>' + ext.ymin + '</ymin>\n'
+        + '      <xmax>' + ext.xmax + '</xmax>\n'
+        + '      <ymax>' + ext.ymax + '</ymax>\n'
+        + '    </extent>\n'
+        + '    <rotation>0</rotation>\n'
+        + '    <destinationsrs>\n'
+        + '      ' + crsBlockWgs84() + '\n'
+        + '    </destinationsrs>\n'
+        + '  </mapcanvas>\n'
+        + '  <projectlayers>\n'
+        + '    <maplayer type="raster" autoRefreshEnabled="0">\n'
+        + '      <id>osm_basemap</id>\n'
+        + '      <datasource>' + xmlEscape(osmSource) + '</datasource>\n'
+        + '      <layername>OpenStreetMap</layername>\n'
+        + '      <provider>wms</provider>\n'
+        + '    </maplayer>\n'
+        + '  </projectlayers>\n'
+        + '  <layerorder>\n'
+        + '    <layer id="osm_basemap"/>\n'
+        + '  </layerorder>\n'
+        + '</qgis>\n'
+  }
+
+  function createProject(name) {
+    if (name.trim() === '') {
+      toast(qsTr('Inserisci un nome per il progetto'))
+      return false
+    }
+    const base = appDataDir()
+    if (base === '') {
+      toast(qsTr('Impossibile individuare la cartella dati di QField'))
+      return false
+    }
+
+    platformUtilities.createDir(base, 'createlayer_projects')
+    const projectsDir = base + '/createlayer_projects'
+
+    let slug = slugify(name)
+    let dirName = slug
+    let counter = 2
+    while (FileUtils.fileExists(projectsDir + '/' + dirName + '/' + dirName + '.qgs')) {
+      dirName = slug + '_' + counter
+      counter++
+    }
+    platformUtilities.createDir(projectsDir, dirName)
+
+    // Estensione iniziale: GPS se disponibile, altrimenti vista corrente,
+    // altrimenti mondo
+    let cx = 0
+    let cy = 0
+    let hasCenter = false
+    if (positionSource && positionSource.active
+        && positionSource.positionInformation
+        && positionSource.positionInformation.latitudeValid) {
+      const wgs = GeometryUtils.reprojectPointToWgs84(
+        positionSource.projectedPosition,
+        positionSource.coordinateTransformer.destinationCrs)
+      cx = wgs.x
+      cy = wgs.y
+      hasCenter = true
+    } else if (homePath() !== '' && mapCanvas && mapCanvas.mapSettings) {
+      const center = mapCanvas.mapSettings.screenToCoordinate(
+        Qt.point(mapCanvas.width / 2, mapCanvas.height / 2))
+      const wgs = GeometryUtils.reprojectPointToWgs84(center, mapCanvas.mapSettings.destinationCrs)
+      if (isFinite(wgs.x) && isFinite(wgs.y) && (wgs.x !== 0 || wgs.y !== 0)) {
+        cx = wgs.x
+        cy = wgs.y
+        hasCenter = true
+      }
+    }
+    const d = 0.005
+    const ext = hasCenter
+        ? { 'xmin': cx - d, 'ymin': cy - d, 'xmax': cx + d, 'ymax': cy + d }
+        : { 'xmin': -180, 'ymin': -60, 'xmax': 180, 'ymax': 75 }
+
+    const projPath = projectsDir + '/' + dirName + '/' + dirName + '.qgs'
+    FileUtils.writeFileContent(projPath, projectTemplate(name.trim(), ext))
+
+    projectDialog.close()
+    layerDialog.close()
+    iface.loadFile(projPath, name.trim())
+    toast(qsTr('Progetto "%1" creato e aperto: ora puoi creare layer che finiscono in legenda').arg(name.trim()))
+    return true
+  }
+
+  // ---------------------------------------------------------------------
   // Digitalizzazione integrata (solo per layer non registrati nel progetto)
   // ---------------------------------------------------------------------
 
@@ -575,10 +708,8 @@ Item {
     round: true
 
     onClicked: {
-      if (!plugin.loadIndex()) {
-        plugin.toast(qsTr('Nessun progetto caricato: apri un progetto prima di usare il plugin'))
-        return
-      }
+      plugin.currentProjectFile = plugin.projectFilePath()
+      plugin.loadIndex()
       layerDialog.open()
     }
   }
@@ -610,6 +741,25 @@ Item {
         id: dialogContent
         width: parent.width
         spacing: 8
+
+        RowLayout {
+          Layout.fillWidth: true
+
+          Label {
+            Layout.fillWidth: true
+            text: plugin.currentProjectFile === ''
+                  ? qsTr('Nessun progetto aperto')
+                  : qsTr('Progetto: %1').arg(FileUtils.fileName(plugin.currentProjectFile))
+            elide: Text.ElideMiddle
+            font.pointSize: Theme.tinyFont.pointSize
+            color: Theme.secondaryTextColor
+          }
+
+          Button {
+            text: qsTr('Nuovo progetto…')
+            onClicked: projectDialog.open()
+          }
+        }
 
         Label {
           text: qsTr('Nuovo layer')
@@ -645,9 +795,19 @@ Item {
         }
 
         Label {
-          visible: !plugin.canEditProject()
+          visible: plugin.currentProjectFile !== ''
+                   && plugin.currentProjectFile.toLowerCase().indexOf('.qgs', plugin.currentProjectFile.length - 4) < 0
           Layout.fillWidth: true
-          text: qsTr('Attenzione: il progetto corrente non è un file .qgs, quindi i nuovi layer non potranno essere aggiunti alla legenda. Resta disponibile la digitalizzazione integrata del plugin.')
+          text: qsTr('Attenzione: il progetto corrente non è un file .qgs, quindi i nuovi layer non potranno essere aggiunti alla legenda. Resta disponibile la digitalizzazione integrata del plugin, oppure crea un nuovo progetto con il pulsante qui sopra.')
+          wrapMode: Text.WordWrap
+          font.pointSize: Theme.tinyFont.pointSize
+          color: Theme.warningColor
+        }
+
+        Label {
+          visible: plugin.currentProjectFile === ''
+          Layout.fillWidth: true
+          text: qsTr('Nessun progetto aperto: crea un nuovo progetto con il pulsante qui sopra, oppure apri un progetto esistente.')
           wrapMode: Text.WordWrap
           font.pointSize: Theme.tinyFont.pointSize
           color: Theme.warningColor
@@ -768,6 +928,44 @@ Item {
           }
         }
       }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Dialogo nuovo progetto
+  // ---------------------------------------------------------------------
+
+  Dialog {
+    id: projectDialog
+    parent: mainWindow.contentItem
+    modal: true
+    title: qsTr('Nuovo progetto')
+    implicitWidth: Math.min(mainWindow.width - 40, 420)
+    x: (mainWindow.width - width) / 2
+    y: (mainWindow.height - height) / 2
+    standardButtons: Dialog.Ok | Dialog.Cancel
+
+    contentItem: ColumnLayout {
+      spacing: 6
+
+      TextField {
+        id: projectNameField
+        Layout.fillWidth: true
+        placeholderText: qsTr('Nome del progetto (es. Rilievo luglio)')
+      }
+
+      Label {
+        Layout.fillWidth: true
+        text: qsTr('Verrà creato un progetto .qgs con sfondo OpenStreetMap nella cartella dati di QField (createlayer_projects), centrato sulla posizione GPS se attiva, e aperto subito. I layer creati al suo interno compariranno in legenda.')
+        wrapMode: Text.WordWrap
+        font.pointSize: Theme.tinyFont.pointSize
+        color: Theme.secondaryTextColor
+      }
+    }
+
+    onAccepted: {
+      if (plugin.createProject(projectNameField.text))
+        projectNameField.text = ''
     }
   }
 
