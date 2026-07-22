@@ -10,7 +10,14 @@ raccolti, senza dover tornare in QGIS desktop.
   poligono) e campi attributo personalizzati (`string`, `number`, `date`).
   I layer sono salvati come **GeoJSON (EPSG:4326)** nella sottocartella
   `qfield_layers/` del progetto corrente.
-- **Digitalizzazione**:
+- **Layer nella legenda (TOC)**: se il progetto aperto è un file **`.qgs`**,
+  il nuovo layer viene registrato automaticamente nel progetto (con **backup
+  automatico** in `<progetto>.qgs.createlayer.bak`) e il progetto viene
+  ricaricato: il layer compare subito nella legenda di QField e si
+  digitalizza con gli **strumenti nativi di QField** (form attributi, GPS,
+  snapping, ecc.).
+- **Digitalizzazione integrata** (per i progetti `.qgz`, non modificabili
+  dal plugin):
   - punti/vertici acquisiti dalla **posizione GPS** o dal **centro mappa**
     (mirino a schermo);
   - per linee e poligoni: aggiunta progressiva dei vertici, annullamento
@@ -50,12 +57,17 @@ https://github.com/enzococca/createlayer/raw/main/createlayer.zip
 2. **Nuovo layer**: inserisci nome, tipo di geometria e (opzionale) i campi
    nel formato `nome:string, altezza:number, data:date`, poi premi
    **Crea layer**.
-3. **Digitalizza**: seleziona un layer e premi **Digitalizza**. Usa
-   **+ GPS** (posizione corrente) o **+ Centro** (mirino al centro mappa) per
-   aggiungere punti o vertici. Per linee/poligoni premi **Concludi** per
-   chiudere la geometria. A ogni geometria viene richiesta la compilazione
-   degli attributi.
-4. **Esporta/Condividi/CSV**: dai pulsanti accanto a ciascun layer, oppure
+3. **Progetti `.qgs`**: il layer viene aggiunto alla legenda e il progetto
+   ricaricato. Selezionalo nella legenda e digitalizza con gli strumenti
+   normali di QField (pulsante **+**). Se il layer ha dei campi, contiene
+   una **riga di esempio senza geometria** che ne definisce i tipi: puoi
+   eliminarla in QGIS quando vuoi.
+4. **Progetti `.qgz`** (legenda non modificabile): seleziona il layer e
+   premi **Digitalizza**. Usa **+ GPS** (posizione corrente) o **+ Centro**
+   (mirino al centro mappa) per aggiungere punti o vertici; per
+   linee/poligoni premi **Concludi** per chiudere la geometria. A ogni
+   geometria viene richiesta la compilazione degli attributi.
+5. **Esporta/Condividi/CSV**: dai pulsanti accanto a ciascun layer, oppure
    **Esporta tutti** per l'archivio compresso dell'intera cartella.
 
 ## Dove finiscono i dati
@@ -74,12 +86,17 @@ I GeoJSON sono in EPSG:4326 e si aprono direttamente in QGIS desktop
 
 ## Limitazioni note
 
-- I layer creati **non vengono aggiunti automaticamente al progetto QGIS
-  aperto in QField** (l'API dei plugin QField non lo consente): sono file
-  GeoJSON gestiti dal plugin, visibili in QGIS desktop o reimportabili nel
-  progetto in un secondo momento.
-- Le geometrie sono semplici (Point/LineString/Polygon, senza anelli interni
-  né multi-parti).
+- L'aggiunta automatica alla legenda funziona solo con progetti **`.qgs`**
+  (XML non compresso): i `.qgz` non sono modificabili dall'API QML di
+  QField, quindi per quei progetti si usa la digitalizzazione integrata del
+  plugin. Suggerimento: in QGIS desktop salva il progetto come `.qgs`.
+- Il plugin modifica il file `.qgs` sul dispositivo; prima di ogni modifica
+  viene creato un backup `<progetto>.qgs.createlayer.bak`. Con progetti
+  **QFieldCloud** la modifica locale del progetto può essere sovrascritta o
+  creare conflitti alla sincronizzazione: usala consapevolmente.
+- La digitalizzazione integrata produce geometrie semplici
+  (Point/LineString/Polygon, senza anelli interni né multi-parti); con gli
+  strumenti nativi di QField non ci sono queste limitazioni.
 - Serve un progetto aperto: i file vengono salvati nella cartella del
   progetto corrente.
 

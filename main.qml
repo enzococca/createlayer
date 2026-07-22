@@ -6,15 +6,20 @@ import org.qgis
 import Theme
 
 /*
- * QField Layer Tools
- * ------------------
- * Plugin QField per creare nuovi layer GeoJSON direttamente sul campo,
- * digitalizzare geometrie (punti, linee, poligoni) tramite GPS o centro
- * mappa, ed esportare/condividere i dati raccolti.
+ * Create Layer
+ * ------------
+ * Plugin QField per creare nuovi layer GeoJSON direttamente sul campo ed
+ * esportare/condividere i dati raccolti.
  *
  * I layer creati vengono salvati come file GeoJSON (EPSG:4326) nella
- * sottocartella "qfield_layers" del progetto corrente, con un file
- * "index.json" che tiene traccia dei layer e dei relativi campi.
+ * sottocartella "qfield_layers" del progetto corrente. Se il progetto è un
+ * file .qgs, il layer viene registrato anche nel progetto stesso (con
+ * backup automatico) e ricaricato con iface.reloadProject(): in questo modo
+ * compare nella legenda (TOC) di QField ed è modificabile con gli strumenti
+ * di digitalizzazione nativi.
+ *
+ * Per i progetti .qgz (compressi) — non modificabili dall'API QML — resta
+ * disponibile la digitalizzazione integrata del plugin (GPS/centro mappa).
  */
 Item {
   id: plugin
@@ -26,10 +31,11 @@ Item {
   // Nome della sottocartella del progetto dove vengono salvati i layer
   readonly property string layersDirName: 'qfield_layers'
 
-  // Indice dei layer creati dal plugin: [{name, file, geometry, fields, created, featureCount}]
+  // Indice dei layer creati dal plugin:
+  // [{name, file, geometry, fields, created, featureCount, layerId, inProject}]
   property var layerIndex: []
 
-  // Stato della sessione di digitalizzazione
+  // Stato della sessione di digitalizzazione (solo layer non nel progetto)
   property int activeLayerIdx: -1
   property var activeCollection: null
   property var pendingVertices: []
@@ -58,6 +64,17 @@ Item {
 
   function layerPath(lyr) {
     return layersDir() + '/' + lyr.file
+  }
+
+  function projectFilePath() {
+    return (typeof qgisProject !== 'undefined' && qgisProject && qgisProject.fileName)
+        ? qgisProject.fileName : ''
+  }
+
+  // Il progetto può essere modificato solo se è un .qgs non compresso
+  function canEditProject() {
+    const path = projectFilePath().toLowerCase()
+    return path.length > 4 && path.indexOf('.qgs', path.length - 4) >= 0
   }
 
   function toast(message) {
@@ -97,6 +114,15 @@ Item {
     } catch (e) {
       return fallback
     }
+  }
+
+  function xmlEscape(s) {
+    return ('' + s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
   }
 
   // ---------------------------------------------------------------------
@@ -148,6 +174,21 @@ Item {
     return fields
   }
 
+  // Feature "di esempio" senza geometria: serve a definire i tipi dei campi
+  // nel file GeoJSON (un layer vuoto non avrebbe altrimenti attributi).
+  function templateFeature(fields) {
+    const props = {}
+    for (let i = 0; i < fields.length; i++) {
+      if (fields[i].type === 'number')
+        props[fields[i].name] = 0.1
+      else if (fields[i].type === 'date')
+        props[fields[i].name] = '2000-01-01'
+      else
+        props[fields[i].name] = ''
+    }
+    return { 'type': 'Feature', 'properties': props, 'geometry': null }
+  }
+
   function createLayer(name, geomType, fieldsSpec) {
     if (!loadIndex()) {
       toast(qsTr('Nessun progetto caricato: apri un progetto prima di creare layer'))
@@ -166,24 +207,44 @@ Item {
       counter++
     }
 
+    const fields = parseFields(fieldsSpec)
     const collection = {
       'type': 'FeatureCollection',
       'name': name.trim(),
       'crs': { 'type': 'name', 'properties': { 'name': 'urn:ogc:def:crs:OGC:1.3:CRS84' } },
-      'features': []
+      'features': fields.length > 0 ? [templateFeature(fields)] : []
     }
     FileUtils.writeFileContent(layersDir() + '/' + file, JSON.stringify(collection))
 
-    layerIndex.push({
+    const lyr = {
       'name': name.trim(),
       'file': file,
       'geometry': geomType,
-      'fields': parseFields(fieldsSpec),
+      'fields': fields,
       'created': new Date().toISOString(),
-      'featureCount': 0
-    })
+      'featureCount': 0,
+      'layerId': 'createlayer_' + slug + '_' + Date.now(),
+      'inProject': false
+    }
+
+    // Se possibile, registra il layer nel progetto .qgs così da farlo
+    // comparire nella legenda (TOC) di QField
+    if (canEditProject()) {
+      if (addLayerToProject(lyr)) {
+        lyr.inProject = true
+        layerIndex.push(lyr)
+        saveIndex()
+        layerDialog.close()
+        iface.reloadProject()
+        toast(qsTr('Layer "%1" creato e aggiunto al progetto: usa gli strumenti di digitalizzazione di QField').arg(lyr.name))
+        return true
+      }
+      toast(qsTr('Impossibile registrare il layer nel progetto: uso la modalità integrata'))
+    }
+
+    layerIndex.push(lyr)
     saveIndex()
-    toast(qsTr('Layer "%1" creato').arg(name.trim()))
+    toast(qsTr('Layer "%1" creato (non in legenda: progetto non modificabile). Usa "Digitalizza"').arg(lyr.name))
     return true
   }
 
@@ -191,14 +252,109 @@ Item {
     const lyr = layerIndex[idx]
     if (activeLayerIdx === idx)
       stopDigitizing()
+    if (lyr.inProject && canEditProject())
+      removeLayerFromProject(lyr)
     platformUtilities.rmFile(layerPath(lyr))
     layerIndex.splice(idx, 1)
     saveIndex()
+    if (lyr.inProject) {
+      layerDialog.close()
+      iface.reloadProject()
+    }
     toast(qsTr('Layer "%1" eliminato').arg(lyr.name))
   }
 
   // ---------------------------------------------------------------------
-  // Digitalizzazione
+  // Registrazione del layer nel file di progetto .qgs
+  // ---------------------------------------------------------------------
+
+  function layerSource(lyr) {
+    // geometrytype forza il tipo di geometria anche su file vuoti
+    return './' + layersDirName + '/' + lyr.file + '|geometrytype=' + lyr.geometry
+  }
+
+  function geometryAttr(geomType) {
+    if (geomType === 'LineString')
+      return 'Line'
+    return geomType === 'Polygon' ? 'Polygon' : 'Point'
+  }
+
+  function addLayerToProject(lyr) {
+    const path = projectFilePath()
+    let xml = toStr(FileUtils.readFileContent(path))
+    if (xml === '' || xml.indexOf('<layer-tree-group') < 0)
+      return false
+    if (xml.indexOf('</projectlayers>') < 0 && xml.indexOf('<projectlayers/>') < 0)
+      return false
+
+    // Backup del progetto prima di modificarlo
+    FileUtils.writeFileContent(path + '.createlayer.bak', xml)
+
+    const source = layerSource(lyr)
+
+    const maplayer = '\n    <maplayer type="vector" geometry="' + geometryAttr(lyr.geometry)
+        + '" autoRefreshEnabled="0" readOnly="0" refreshOnNotifyEnabled="0">\n'
+        + '      <id>' + lyr.layerId + '</id>\n'
+        + '      <datasource>' + xmlEscape(source) + '</datasource>\n'
+        + '      <layername>' + xmlEscape(lyr.name) + '</layername>\n'
+        + '      <provider encoding="UTF-8">ogr</provider>\n'
+        + '    </maplayer>\n  '
+
+    if (xml.indexOf('<projectlayers/>') >= 0) {
+      xml = xml.replace('<projectlayers/>', '<projectlayers>' + maplayer + '</projectlayers>')
+    } else {
+      xml = xml.replace('</projectlayers>', maplayer + '</projectlayers>')
+    }
+
+    // Voce nella legenda: subito dopo l'apertura del gruppo radice
+    const treeLayer = '\n    <layer-tree-layer id="' + lyr.layerId + '" name="' + xmlEscape(lyr.name)
+        + '" source="' + xmlEscape(source)
+        + '" providerKey="ogr" checked="Qt::Checked" expanded="1"/>'
+    const groupStart = xml.indexOf('<layer-tree-group')
+    if (groupStart < 0)
+      return false
+    let groupEnd = xml.indexOf('>', groupStart)
+    if (groupEnd < 0)
+      return false
+    if (xml.charAt(groupEnd - 1) === '/') {
+      // Gruppo radice vuoto e auto-chiuso: va riaperto
+      xml = xml.slice(0, groupEnd - 1) + '>' + treeLayer + '\n  </layer-tree-group>' + xml.slice(groupEnd + 1)
+    } else {
+      xml = xml.slice(0, groupEnd + 1) + treeLayer + xml.slice(groupEnd + 1)
+    }
+
+    FileUtils.writeFileContent(path, xml)
+    return true
+  }
+
+  function removeLayerFromProject(lyr) {
+    const path = projectFilePath()
+    let xml = toStr(FileUtils.readFileContent(path))
+    if (xml === '')
+      return false
+
+    FileUtils.writeFileContent(path + '.createlayer.bak', xml)
+
+    // Rimuove la voce di legenda (inserita dal plugin, quindi auto-chiusa)
+    const treeRe = new RegExp('\\s*<layer-tree-layer id="' + lyr.layerId + '"[^>]*/>')
+    xml = xml.replace(treeRe, '')
+
+    // Rimuove il blocco <maplayer> contenente l'id del layer
+    const idTag = '<id>' + lyr.layerId + '</id>'
+    const idPos = xml.indexOf(idTag)
+    if (idPos >= 0) {
+      const start = xml.lastIndexOf('<maplayer', idPos)
+      const end = xml.indexOf('</maplayer>', idPos)
+      if (start >= 0 && end >= 0)
+        xml = xml.slice(0, start) + xml.slice(end + '</maplayer>'.length)
+    }
+
+    FileUtils.writeFileContent(path, xml)
+    return true
+  }
+
+  // ---------------------------------------------------------------------
+  // Digitalizzazione integrata (solo per layer non registrati nel progetto)
   // ---------------------------------------------------------------------
 
   function geometryLabel(geomType) {
@@ -337,6 +493,8 @@ Item {
   }
 
   function geomToWkt(geom) {
+    if (!geom)
+      return ''
     if (geom.type === 'Point') {
       return 'POINT (' + geom.coordinates[0] + ' ' + geom.coordinates[1] + ')'
     }
@@ -345,6 +503,17 @@ Item {
     }
     if (geom.type === 'Polygon') {
       return 'POLYGON ((' + geom.coordinates[0].map(c => c[0] + ' ' + c[1]).join(', ') + '))'
+    }
+    if (geom.type === 'MultiPoint') {
+      return 'MULTIPOINT (' + geom.coordinates.map(c => '(' + c[0] + ' ' + c[1] + ')').join(', ') + ')'
+    }
+    if (geom.type === 'MultiLineString') {
+      return 'MULTILINESTRING (' + geom.coordinates.map(
+        line => '(' + line.map(c => c[0] + ' ' + c[1]).join(', ') + ')').join(', ') + ')'
+    }
+    if (geom.type === 'MultiPolygon') {
+      return 'MULTIPOLYGON (' + geom.coordinates.map(
+        poly => '((' + poly[0].map(c => c[0] + ' ' + c[1]).join(', ') + '))').join(', ') + ')'
     }
     return ''
   }
@@ -365,7 +534,17 @@ Item {
       toast(qsTr('Impossibile leggere il file del layer'))
       return
     }
+    // Le feature possono avere campi aggiunti da QField: unione dei nomi
     const fieldNames = lyr.fields.map(f => f.name)
+    for (let i = 0; i < collection.features.length; i++) {
+      const props = collection.features[i].properties
+      if (!props)
+        continue
+      for (const key in props) {
+        if (fieldNames.indexOf(key) < 0)
+          fieldNames.push(key)
+      }
+    }
     let csv = 'fid,wkt_geometry'
     for (let i = 0; i < fieldNames.length; i++)
       csv += ',' + csvEscape(fieldNames[i])
@@ -412,7 +591,7 @@ Item {
     id: layerDialog
     parent: mainWindow.contentItem
     modal: true
-    title: qsTr('Layer Tools')
+    title: qsTr('Create Layer')
     width: Math.min(mainWindow.width - 40, 500)
     height: Math.min(mainWindow.height - 80, 640)
     x: (mainWindow.width - width) / 2
@@ -460,6 +639,15 @@ Item {
           wrapMode: Text.WordWrap
           font.pointSize: Theme.tinyFont.pointSize
           color: Theme.secondaryTextColor
+        }
+
+        Label {
+          visible: !plugin.canEditProject()
+          Layout.fillWidth: true
+          text: qsTr('Attenzione: il progetto corrente non è un file .qgs, quindi i nuovi layer non potranno essere aggiunti alla legenda. Resta disponibile la digitalizzazione integrata del plugin.')
+          wrapMode: Text.WordWrap
+          font.pointSize: Theme.tinyFont.pointSize
+          color: Theme.warningColor
         }
 
         Button {
@@ -527,7 +715,7 @@ Item {
 
               Label {
                 Layout.fillWidth: true
-                text: modelData.name
+                text: modelData.name + (modelData.inProject ? ' · ' + qsTr('in legenda') : '')
                 font.bold: true
                 elide: Text.ElideRight
               }
@@ -535,7 +723,9 @@ Item {
               Label {
                 Layout.fillWidth: true
                 text: plugin.geometryLabel(modelData.geometry)
-                      + ' · ' + qsTr('%1 geometrie').arg(modelData.featureCount)
+                      + (modelData.inProject
+                         ? ' · ' + qsTr('modifica con gli strumenti QField')
+                         : ' · ' + qsTr('%1 geometrie').arg(modelData.featureCount))
                       + ' · ' + modelData.file
                 font.pointSize: Theme.tinyFont.pointSize
                 color: Theme.secondaryTextColor
@@ -547,6 +737,7 @@ Item {
                 spacing: 6
 
                 Button {
+                  visible: !modelData.inProject
                   text: qsTr('Digitalizza')
                   onClicked: plugin.startDigitizing(index)
                 }
@@ -594,7 +785,7 @@ Item {
 
     Label {
       text: deleteDialog.layerIdx >= 0 && deleteDialog.layerIdx < plugin.layerIndex.length
-            ? qsTr('Il layer "%1" e il relativo file GeoJSON verranno eliminati definitivamente.').arg(plugin.layerIndex[deleteDialog.layerIdx].name)
+            ? qsTr('Il layer "%1" verrà rimosso dal progetto e il file GeoJSON eliminato definitivamente.').arg(plugin.layerIndex[deleteDialog.layerIdx].name)
             : ''
       wrapMode: Text.WordWrap
       width: Math.min(mainWindow.width - 80, 400)
@@ -608,7 +799,7 @@ Item {
   }
 
   // ---------------------------------------------------------------------
-  // Dialogo attributi (mostrato al salvataggio di ogni geometria)
+  // Dialogo attributi (digitalizzazione integrata)
   // ---------------------------------------------------------------------
 
   Dialog {
@@ -702,7 +893,7 @@ Item {
   }
 
   // ---------------------------------------------------------------------
-  // Mirino al centro della mappa durante la digitalizzazione
+  // Mirino al centro della mappa durante la digitalizzazione integrata
   // ---------------------------------------------------------------------
 
   Item {
@@ -737,7 +928,7 @@ Item {
   }
 
   // ---------------------------------------------------------------------
-  // Pannello flottante di digitalizzazione
+  // Pannello flottante di digitalizzazione integrata
   // ---------------------------------------------------------------------
 
   Rectangle {
