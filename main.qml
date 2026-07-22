@@ -97,7 +97,8 @@ Item {
 
   readonly property string selftestContent: 'createlayer-selftest-0123456789'
   readonly property string selftestMd5: '6759049ff2a5b14184120ce0c3dfdc5b'
-  property string ioMode: 'unknown'
+  property string writeMode: 'unknown'   // string | buffer | broken
+  property string readMode: 'unknown'    // bytes | fileinfo | xhr | broken
   property string ioDetail: ''
   property string ioCheckedFor: ''
 
@@ -142,59 +143,97 @@ Item {
     return ''
   }
 
+  // Lettura tramite XMLHttpRequest sincrona su file:// (non passa dal
+  // ponte QByteArray). Può essere bloccata dalla configurazione di Qt.
+  function xhrRead(path) {
+    try {
+      const xhr = new XMLHttpRequest()
+      xhr.open('GET', 'file://' + path, false)
+      xhr.send()
+      if (xhr.responseText !== undefined && xhr.responseText !== null
+          && xhr.responseText.length > 0)
+        return '' + xhr.responseText
+    } catch (e) {
+    }
+    return ''
+  }
+
+  // Lettura tramite getFileInfo (il contenuto attraversa una QVariantMap:
+  // percorso di conversione diverso da readFileContent)
+  function fileInfoRead(path) {
+    try {
+      const info = FileUtils.getFileInfo(path)
+      if (info && info.content !== undefined && info.content !== null)
+        return toStr(info.content)
+    } catch (e) {
+    }
+    return ''
+  }
+
   function ensureIo() {
     if (homePath() === '')
       return
-    if (ioMode !== 'unknown' && ioCheckedFor === homePath())
+    if (writeMode !== 'unknown' && ioCheckedFor === homePath())
       return
     ioCheckedFor = homePath()
     const p = layersDir() + '/selftest.txt'
 
-    // 1) scrittura come stringa
+    // Scrittura come stringa + lettura byte: il percorso normale
     FileUtils.writeFileContent(p, selftestContent)
-    const stringBack = toStr(FileUtils.readFileContent(p))
-    if (stringBack === selftestContent) {
-      ioMode = 'string'
+    if (toStr(FileUtils.readFileContent(p)) === selftestContent) {
+      writeMode = 'string'
+      readMode = 'bytes'
       ioDetail = 'ok'
       platformUtilities.rmFile(p)
       return
     }
-    const stringMd5 = fileMd5(p)
 
-    // 2) scrittura come buffer UTF-8
-    FileUtils.writeFileContent(p, strToBuffer(selftestContent))
-    const bufferBack = toStr(FileUtils.readFileContent(p))
-    if (bufferBack === selftestContent) {
-      ioMode = 'buffer'
-      ioDetail = 'scrittura stringa difettosa; uso buffer binario'
-      platformUtilities.rmFile(p)
-      logDebug('selftest IO: ' + ioMode + ' — ' + ioDetail)
-      return
-    }
-    const bufferMd5 = fileMd5(p)
-
-    // 3) round-trip fallito in entrambe le modalità: verifica se almeno la
-    //    scrittura è corretta tramite md5 (lettura difettosa)
-    if (bufferMd5 === selftestMd5) {
-      ioMode = 'buffer-read-broken'
-      ioDetail = 'scrittura buffer ok (md5 verificato), lettura difettosa'
-    } else if (stringMd5 === selftestMd5) {
-      ioMode = 'string-read-broken'
-      ioDetail = 'scrittura stringa ok (md5 verificato), lettura difettosa'
+    // Individua una modalità di SCRITTURA corretta tramite md5
+    if (fileMd5(p) === selftestMd5) {
+      writeMode = 'string'
     } else {
-      ioMode = 'broken'
-      ioDetail = 'md5 stringa=' + stringMd5 + ', md5 buffer=' + bufferMd5
-                 + ', atteso=' + selftestMd5
+      FileUtils.writeFileContent(p, strToBuffer(selftestContent))
+      if (fileMd5(p) === selftestMd5) {
+        writeMode = 'buffer'
+      } else {
+        writeMode = 'broken'
+        readMode = 'broken'
+        ioDetail = 'nessuna modalità di scrittura produce file corretti'
+        platformUtilities.rmFile(p)
+        logDebug('selftest IO: scrittura=' + writeMode + ' — ' + ioDetail)
+        return
+      }
     }
+
+    // Il file di prova ora è corretto su disco: individua una LETTURA valida
+    if (toStr(FileUtils.readFileContent(p)) === selftestContent)
+      readMode = 'bytes'
+    else if (fileInfoRead(p) === selftestContent)
+      readMode = 'fileinfo'
+    else if (xhrRead(p) === selftestContent)
+      readMode = 'xhr'
+    else
+      readMode = 'broken'
+
+    ioDetail = 'scrittura=' + writeMode + ', lettura=' + readMode
     platformUtilities.rmFile(p)
-    logDebug('selftest IO: ' + ioMode + ' — ' + ioDetail)
+    logDebug('selftest IO: ' + ioDetail)
   }
 
   // Scrittura testo con la modalità individuata dal self-test
   function writeText(path, s) {
-    if (ioMode === 'buffer' || ioMode === 'buffer-read-broken')
+    if (writeMode === 'buffer')
       return FileUtils.writeFileContent(path, strToBuffer(s))
     return FileUtils.writeFileContent(path, s)
+  }
+
+  // Lettura testo con la modalità individuata dal self-test
+  function readText(path) {
+    if (readMode === 'fileinfo')
+      return fileInfoRead(path)
+    if (readMode === 'xhr')
+      return xhrRead(path)
+    return toStr(FileUtils.readFileContent(path))
   }
 
   // ---------------------------------------------------------------------
@@ -248,7 +287,7 @@ Item {
       logDebug('file non trovato: ' + path)
       return fallback
     }
-    const raw = toStr(FileUtils.readFileContent(path))
+    const raw = readText(path)
     try {
       return JSON.parse(raw)
     } catch (e) {
@@ -474,7 +513,7 @@ Item {
 
   function addLayerToProject(lyr) {
     const path = projectFilePath()
-    let xml = toStr(FileUtils.readFileContent(path))
+    let xml = readText(path)
     // Un progetto valido deve contenere la radice <qgis>: contenuto vuoto o
     // corrotto (es. file scritto con il ponte stringa difettoso) non lo è
     if (xml.indexOf('<qgis') < 0) {
@@ -557,7 +596,7 @@ Item {
 
   function removeLayerFromProject(lyr) {
     const path = projectFilePath()
-    let xml = toStr(FileUtils.readFileContent(path))
+    let xml = readText(path)
     if (xml === '')
       return false
 
@@ -737,7 +776,7 @@ Item {
     let collection = readJsonFile(path, null)
     if (!collection) {
       const exists = FileUtils.fileExists(path)
-      const contentLength = exists ? toStr(FileUtils.readFileContent(path)).length : -1
+      const contentLength = exists ? readText(path).length : -1
       logDebug('lettura layer fallita: ' + path + ' (exists=' + exists
                + ', byte letti=' + contentLength + ', featureCount=' + lyr.featureCount + ')')
       if (!lyr.featureCount) {
@@ -864,9 +903,10 @@ Item {
 
   function diagnosticsReport() {
     const lines = []
-    lines.push('plugin: Create Layer 1.6.0')
+    lines.push('plugin: Create Layer 1.7.0')
     ensureIo()
-    lines.push('ioMode: ' + ioMode + (ioDetail !== '' ? ' (' + ioDetail + ')' : ''))
+    lines.push('io: scrittura=' + writeMode + ', lettura=' + readMode
+               + (ioDetail !== '' ? ' (' + ioDetail + ')' : ''))
     lines.push('projectFile: ' + projectFilePath())
     lines.push('homePath: ' + homePath())
     lines.push('canEditProject: ' + canEditProject())
@@ -875,10 +915,10 @@ Item {
     const projPath = projectFilePath()
     if (projPath !== '') {
       lines.push('project exists: ' + FileUtils.fileExists(projPath))
-      lines.push('project read: ' + toStr(FileUtils.readFileContent(projPath)).length + ' byte')
+      lines.push('project read: ' + readText(projPath).length + ' byte')
     }
     lines.push('index exists: ' + FileUtils.fileExists(indexPath()))
-    const idxRaw = toStr(FileUtils.readFileContent(indexPath()))
+    const idxRaw = readText(indexPath())
     lines.push('index read: ' + idxRaw.length + ' byte')
     try {
       const parsed = JSON.parse(idxRaw)
@@ -896,7 +936,7 @@ Item {
                  + ' inProject=' + (lyr.inProject === true)
                  + ' featureCount=' + lyr.featureCount
                  + ' exists=' + FileUtils.fileExists(path)
-                 + ' read=' + toStr(FileUtils.readFileContent(path)).length + ' byte')
+                 + ' read=' + readText(path).length + ' byte')
     }
     return lines.join('\n')
   }
@@ -1161,9 +1201,9 @@ Item {
         }
 
         Label {
-          visible: plugin.ioMode === 'broken' || plugin.ioMode.indexOf('read-broken') >= 0
+          visible: plugin.writeMode === 'broken' || plugin.readMode === 'broken'
           Layout.fillWidth: true
-          text: plugin.ioMode === 'broken'
+          text: plugin.writeMode === 'broken'
                 ? qsTr('Attenzione: il self-test di scrittura file è fallito su questo dispositivo. Apri Diagnostica e invia il report allo sviluppatore.')
                 : qsTr('Nota: su questo dispositivo la rilettura dei file è difettosa; creazione e salvataggio funzionano, ma l\'elenco dei layer può risultare vuoto riaprendo il plugin.')
           wrapMode: Text.WordWrap
