@@ -89,6 +89,14 @@ Item {
     iface.logMessage('[createlayer] ' + message)
   }
 
+  // Interfaccia bilingue: inglese di default, italiano se la lingua del
+  // dispositivo e' l'italiano
+  readonly property bool useItalian: Qt.locale().name.toLowerCase().indexOf('it') === 0
+
+  function T(en, it) {
+    return useItalian ? it : en
+  }
+
   // Ultimo errore interno significativo (mostrato in Diagnostica)
   property string lastError: ''
 
@@ -378,21 +386,21 @@ Item {
   property var newFields: []
 
   function typeLabel(ftype) {
-    if (ftype === 'integer') return qsTr('Numero intero')
-    if (ftype === 'number') return qsTr('Numero decimale')
-    if (ftype === 'date') return qsTr('Data')
-    return qsTr('Testo')
+    if (ftype === 'integer') return T('Integer', 'Numero intero')
+    if (ftype === 'number') return T('Decimal number', 'Numero decimale')
+    if (ftype === 'date') return T('Date', 'Data')
+    return T('Text', 'Testo')
   }
 
   function addNewField(name, ftype) {
     const fname = name.trim()
     if (fname === '') {
-      toast(qsTr('Inserisci il nome del campo'))
+      toast(T('Enter the field name', 'Inserisci il nome del campo'))
       return false
     }
     for (let i = 0; i < newFields.length; i++) {
       if (newFields[i].name.toLowerCase() === fname.toLowerCase()) {
-        toast(qsTr('Esiste già un campo "%1"').arg(fname))
+        toast(T('A field named "%1" already exists', 'Esiste già un campo "%1"').arg(fname))
         return false
       }
     }
@@ -427,11 +435,11 @@ Item {
 
   function createLayer(name, geomType, fields) {
     if (!loadIndex()) {
-      toast(qsTr('Nessun progetto caricato: apri un progetto prima di creare layer'))
+      toast(T('No project loaded: open a project before creating layers', 'Nessun progetto caricato: apri un progetto prima di creare layer'))
       return false
     }
     if (name.trim() === '') {
-      toast(qsTr('Inserisci un nome per il layer'))
+      toast(T('Enter a name for the layer', 'Inserisci un nome per il layer'))
       return false
     }
 
@@ -454,7 +462,7 @@ Item {
     }
     if (!writeText(layersDir() + '/' + file, JSON.stringify(collection))) {
       logDebug('scrittura fallita: ' + layersDir() + '/' + file)
-      toast(qsTr('Errore: impossibile scrivere il file del layer (cartella di sola lettura?)'))
+      toast(T('Error: cannot write the layer file (read-only folder?)', 'Errore: impossibile scrivere il file del layer (cartella di sola lettura?)'))
       return false
     }
 
@@ -478,18 +486,18 @@ Item {
         saveIndex()
         layerDialog.close()
         iface.reloadProject()
-        toast(qsTr('Layer "%1" creato e aggiunto al progetto: usa gli strumenti di digitalizzazione di QField').arg(lyr.name))
+        toast(T('Layer "%1" created and added to the project: use QField digitizing tools', 'Layer "%1" creato e aggiunto al progetto: usa gli strumenti di digitalizzazione di QField').arg(lyr.name))
         return true
       }
       // Niente TOC: la riga di esempio non serve nella modalità integrata
       collection.features = []
       writeText(layersDir() + '/' + file, JSON.stringify(collection))
-      toast(qsTr('Impossibile registrare il layer nel progetto (%1): uso la modalità integrata').arg(lastError))
+      toast(T('Cannot register the layer in the project (%1): using integrated mode', 'Impossibile registrare il layer nel progetto (%1): uso la modalità integrata').arg(lastError))
     }
 
     layerIndex.push(lyr)
     saveIndex()
-    toast(qsTr('Layer "%1" creato (non in legenda: progetto non modificabile). Usa "Digitalizza"').arg(lyr.name))
+    toast(T('Layer "%1" created (not in legend: project not editable). Use "Digitize"', 'Layer "%1" creato (non in legenda: progetto non modificabile). Usa "Digitalizza"').arg(lyr.name))
     return true
   }
 
@@ -510,7 +518,7 @@ Item {
       layerDialog.close()
       iface.reloadProject()
     }
-    toast(qsTr('Layer "%1" eliminato').arg(lyr.name))
+    toast(T('Layer "%1" deleted', 'Layer "%1" eliminato').arg(lyr.name))
   }
 
   // ---------------------------------------------------------------------
@@ -616,7 +624,7 @@ Item {
   function retryAddToProject(idx) {
     const lyr = layerIndex[idx]
     if (!canEditProject()) {
-      toast(qsTr('Il progetto corrente non è un file .qgs modificabile'))
+      toast(T('The current project is not an editable .qgs file', 'Il progetto corrente non è un file .qgs modificabile'))
       return
     }
     let ok
@@ -632,12 +640,12 @@ Item {
     }
     saveIndex()
     if (!ok) {
-      toast(qsTr('Registrazione fallita: %1').arg(lastError))
+      toast(T('Registration failed: %1', 'Registrazione fallita: %1').arg(lastError))
       return
     }
     layerDialog.close()
     iface.reloadProject()
-    toast(qsTr('Layer "%1" aggiunto alla legenda').arg(lyr.name))
+    toast(T('Layer "%1" added to the legend', 'Layer "%1" aggiunto alla legenda').arg(lyr.name))
   }
 
   // Inserisce il layer nell'XML di progetto; restituisce il nuovo XML o
@@ -817,7 +825,7 @@ Item {
 
   function createProject(name) {
     if (name.trim() === '') {
-      toast(qsTr('Inserisci un nome per il progetto'))
+      toast(T('Enter a name for the project', 'Inserisci un nome per il progetto'))
       return false
     }
 
@@ -827,7 +835,7 @@ Item {
       projectDialog.close()
       layerDialog.close()
       iface.importUrl(starterProjectUrl, name.trim(), true)
-      toast(qsTr('Download del progetto di partenza in corso (serve connessione): verrà aperto automaticamente'))
+      toast(T('Downloading the starter project (network required): it will open automatically', 'Download del progetto di partenza in corso (serve connessione): verrà aperto automaticamente'))
       return true
     }
 
@@ -879,7 +887,7 @@ Item {
     if (!writeText(projPath, projectTemplate(name.trim(), ext))
         || !FileUtils.fileExists(projPath)) {
       logDebug('scrittura progetto fallita: ' + projPath)
-      toast(qsTr('Errore: impossibile scrivere il file di progetto (cartella di sola lettura?)'))
+      toast(T('Error: cannot write the project file (read-only folder?)', 'Errore: impossibile scrivere il file di progetto (cartella di sola lettura?)'))
       return false
     }
 
@@ -887,10 +895,10 @@ Item {
     layerDialog.close()
     if (!iface.loadFile(projPath, name.trim())) {
       logDebug('apertura progetto fallita: ' + projPath)
-      toast(qsTr('Progetto creato in %1 ma apertura automatica fallita: aprilo dai file locali di QField').arg(projPath))
+      toast(T('Project created at %1 but automatic opening failed: open it from QField local files', 'Progetto creato in %1 ma apertura automatica fallita: aprilo dai file locali di QField').arg(projPath))
       return true
     }
-    toast(qsTr('Progetto "%1" creato e aperto: ora puoi creare layer che finiscono in legenda').arg(name.trim()))
+    toast(T('Project "%1" created and opened: layers you create will appear in the legend', 'Progetto "%1" creato e aperto: ora puoi creare layer che finiscono in legenda').arg(name.trim()))
     return true
   }
 
@@ -899,9 +907,9 @@ Item {
   // ---------------------------------------------------------------------
 
   function geometryLabel(geomType) {
-    if (geomType === 'Point') return qsTr('Punto')
-    if (geomType === 'LineString') return qsTr('Linea')
-    return qsTr('Poligono')
+    if (geomType === 'Point') return T('Point', 'Punto')
+    if (geomType === 'LineString') return T('Line', 'Linea')
+    return T('Polygon', 'Poligono')
   }
 
   function startDigitizing(idx) {
@@ -931,9 +939,9 @@ Item {
           'crs': { 'type': 'name', 'properties': { 'name': 'urn:ogc:def:crs:OGC:1.3:CRS84' } },
           'features': []
         }
-        toast(qsTr('File del layer non leggibile: verrà ricreato al primo salvataggio'))
+        toast(T('Layer file unreadable: it will be recreated on first save', 'File del layer non leggibile: verrà ricreato al primo salvataggio'))
       } else {
-        toast(qsTr('Impossibile leggere il file del layer (%1 geometrie presenti): dettagli nel registro messaggi di QField').arg(lyr.featureCount))
+        toast(T('Cannot read the layer file (%1 features present): details in the QField message log', 'Impossibile leggere il file del layer (%1 geometrie presenti): dettagli nel registro messaggi di QField').arg(lyr.featureCount))
         return
       }
     }
@@ -941,7 +949,7 @@ Item {
     activeLayerIdx = idx
     pendingVertices = []
     layerDialog.close()
-    toast(qsTr('Digitalizzazione su "%1": aggiungi vertici con GPS o centro mappa').arg(lyr.name))
+    toast(T('Digitizing on "%1": add vertices with GPS or map center', 'Digitalizzazione su "%1": aggiungi vertici con GPS o centro mappa').arg(lyr.name))
   }
 
   function stopDigitizing() {
@@ -955,7 +963,7 @@ Item {
     if (!positionSource || !positionSource.active
         || !positionSource.positionInformation
         || !positionSource.positionInformation.latitudeValid) {
-      toast(qsTr('Posizione GPS non disponibile: attiva il posizionamento'))
+      toast(T('GPS position unavailable: enable positioning', 'Posizione GPS non disponibile: attiva il posizionamento'))
       return
     }
     const wgs = GeometryUtils.reprojectPointToWgs84(
@@ -983,7 +991,7 @@ Item {
       const verts = pendingVertices.slice()
       verts.push(vertex)
       pendingVertices = verts
-      toast(qsTr('Vertice %1 aggiunto').arg(pendingVertices.length))
+      toast(T('Vertex %1 added', 'Vertice %1 aggiunto').arg(pendingVertices.length))
     }
   }
 
@@ -993,7 +1001,7 @@ Item {
     const verts = pendingVertices.slice()
     verts.pop()
     pendingVertices = verts
-    toast(qsTr('Ultimo vertice rimosso (%1 rimasti)').arg(pendingVertices.length))
+    toast(T('Last vertex removed (%1 left)', 'Ultimo vertice rimosso (%1 rimasti)').arg(pendingVertices.length))
   }
 
   function finishFeature() {
@@ -1002,13 +1010,13 @@ Item {
     const lyr = layerIndex[activeLayerIdx]
     if (lyr.geometry === 'LineString') {
       if (pendingVertices.length < 2) {
-        toast(qsTr('Servono almeno 2 vertici per una linea'))
+        toast(T('A line needs at least 2 vertices', 'Servono almeno 2 vertici per una linea'))
         return
       }
       pendingGeometry = { 'type': 'LineString', 'coordinates': pendingVertices.slice() }
     } else if (lyr.geometry === 'Polygon') {
       if (pendingVertices.length < 3) {
-        toast(qsTr('Servono almeno 3 vertici per un poligono'))
+        toast(T('A polygon needs at least 3 vertices', 'Servono almeno 3 vertici per un poligono'))
         return
       }
       const ring = pendingVertices.slice()
@@ -1037,7 +1045,7 @@ Item {
     saveIndex()
     pendingGeometry = null
     pendingVertices = []
-    toast(qsTr('Geometria salvata in "%1" (%2 totali)').arg(lyr.name).arg(lyr.featureCount))
+    toast(T('Feature saved to "%1" (%2 total)', 'Geometria salvata in "%1" (%2 totali)').arg(lyr.name).arg(lyr.featureCount))
   }
 
   // ---------------------------------------------------------------------
@@ -1046,7 +1054,7 @@ Item {
 
   function diagnosticsReport() {
     const lines = []
-    lines.push('plugin: Create Layer 1.10.0')
+    lines.push('plugin: Create Layer 1.11.0')
     ensureIo()
     lines.push('io: scrittura=' + writeMode + ', lettura=' + readMode
                + (ioDetail !== '' ? ' (' + ioDetail + ')' : ''))
@@ -1102,10 +1110,20 @@ Item {
 
   function exportAll() {
     if (layerIndex.length === 0) {
-      toast(qsTr('Nessun layer da esportare'))
+      toast(T('No layers to export', 'Nessun layer da esportare'))
       return
     }
     platformUtilities.sendCompressedFolderTo(layersDir())
+  }
+
+  // Comprime e condivide l'intera cartella del progetto corrente
+  // (file .qgs incluso)
+  function exportProject() {
+    if (homePath() === '') {
+      toast(T('No project open', 'Nessun progetto aperto'))
+      return
+    }
+    platformUtilities.sendCompressedFolderTo(homePath())
   }
 
   function geomToWkt(geom) {
@@ -1147,7 +1165,7 @@ Item {
     const lyr = layerIndex[idx]
     const collection = readJsonFile(layerPath(lyr), null)
     if (!collection) {
-      toast(qsTr('Impossibile leggere il file del layer'))
+      toast(T('Cannot read the layer file', 'Impossibile leggere il file del layer'))
       return
     }
     // Le feature possono avere campi aggiunti da QField: unione dei nomi
@@ -1205,7 +1223,7 @@ Item {
     id: layerDialog
     parent: mainWindow.contentItem
     modal: true
-    title: qsTr('Create Layer')
+    title: T('Create Layer', 'Create Layer')
     // implicitWidth/Height espliciti: evitano il binding loop del Dialog
     // Material (implicitWidth calcolata dal contenuto che dipende dalla
     // larghezza del dialogo stesso)
@@ -1231,21 +1249,21 @@ Item {
           Label {
             Layout.fillWidth: true
             text: plugin.currentProjectFile === ''
-                  ? qsTr('Nessun progetto aperto')
-                  : qsTr('Progetto: %1').arg(FileUtils.fileName(plugin.currentProjectFile))
+                  ? T('No project open', 'Nessun progetto aperto')
+                  : T('Project: %1', 'Progetto: %1').arg(FileUtils.fileName(plugin.currentProjectFile))
             elide: Text.ElideMiddle
             font.pointSize: Theme.tinyFont.pointSize
             color: Theme.secondaryTextColor
           }
 
           Button {
-            text: qsTr('Nuovo progetto…')
+            text: T('New project…', 'Nuovo progetto…')
             onClicked: projectDialog.open()
           }
         }
 
         Label {
-          text: qsTr('Nuovo layer')
+          text: T('New layer', 'Nuovo layer')
           font.bold: true
           font.pointSize: Theme.defaultFont.pointSize + 2
         }
@@ -1253,18 +1271,18 @@ Item {
         TextField {
           id: nameField
           Layout.fillWidth: true
-          placeholderText: qsTr('Nome del layer (es. Alberi abbattuti)')
+          placeholderText: T('Layer name (e.g. Felled trees)', 'Nome del layer (es. Alberi abbattuti)')
         }
 
         ComboBox {
           id: geometryCombo
           Layout.fillWidth: true
-          model: [qsTr('Punto'), qsTr('Linea'), qsTr('Poligono')]
+          model: [T('Point', 'Punto'), T('Line', 'Linea'), T('Polygon', 'Poligono')]
           property var geometryTypes: ['Point', 'LineString', 'Polygon']
         }
 
         Label {
-          text: qsTr('Campi del layer')
+          text: T('Layer fields', 'Campi del layer')
           font.bold: true
         }
 
@@ -1275,18 +1293,18 @@ Item {
           TextField {
             id: fieldNameField
             Layout.fillWidth: true
-            placeholderText: qsTr('Nome del campo')
+            placeholderText: T('Field name', 'Nome del campo')
           }
 
           ComboBox {
             id: fieldTypeCombo
             Layout.preferredWidth: 150
-            model: [qsTr('Testo'), qsTr('Numero intero'), qsTr('Numero decimale'), qsTr('Data')]
+            model: [T('Text', 'Testo'), T('Integer', 'Numero intero'), T('Decimal number', 'Numero decimale'), T('Date', 'Data')]
             property var fieldTypes: ['string', 'integer', 'number', 'date']
           }
 
           Button {
-            text: qsTr('Aggiungi')
+            text: T('Add', 'Aggiungi')
             onClicked: {
               if (plugin.addNewField(fieldNameField.text,
                                      fieldTypeCombo.fieldTypes[fieldTypeCombo.currentIndex])) {
@@ -1299,7 +1317,7 @@ Item {
         Label {
           visible: plugin.newFields.length === 0
           Layout.fillWidth: true
-          text: qsTr('Nessun campo aggiunto: il layer verrà creato senza attributi.')
+          text: T('No fields added: the layer will be created without attributes.', 'Nessun campo aggiunto: il layer verrà creato senza attributi.')
           wrapMode: Text.WordWrap
           font.pointSize: Theme.tinyFont.pointSize
           color: Theme.secondaryTextColor
@@ -1322,7 +1340,7 @@ Item {
             }
 
             Button {
-              text: qsTr('Rimuovi')
+              text: T('Remove', 'Rimuovi')
               onClicked: plugin.removeNewField(index)
             }
           }
@@ -1332,7 +1350,7 @@ Item {
           visible: plugin.currentProjectFile !== ''
                    && plugin.currentProjectFile.toLowerCase().indexOf('.qgs', plugin.currentProjectFile.length - 4) < 0
           Layout.fillWidth: true
-          text: qsTr('Attenzione: il progetto corrente non è un file .qgs, quindi i nuovi layer non potranno essere aggiunti alla legenda. Resta disponibile la digitalizzazione integrata del plugin, oppure crea un nuovo progetto con il pulsante qui sopra.')
+          text: T('Warning: the current project is not a .qgs file, so new layers cannot be added to the legend. The plugin integrated digitizing remains available, or create a new project with the button above.', 'Attenzione: il progetto corrente non è un file .qgs, quindi i nuovi layer non potranno essere aggiunti alla legenda. Resta disponibile la digitalizzazione integrata del plugin, oppure crea un nuovo progetto con il pulsante qui sopra.')
           wrapMode: Text.WordWrap
           font.pointSize: Theme.tinyFont.pointSize
           color: Theme.warningColor
@@ -1341,7 +1359,7 @@ Item {
         Label {
           visible: plugin.currentProjectFile === ''
           Layout.fillWidth: true
-          text: qsTr('Nessun progetto aperto: con "Nuovo progetto…" verrà scaricato e aperto un progetto di partenza (serve connessione), oppure apri prima un progetto esistente.')
+          text: T('No project open: "New project…" will download and open a starter project (network required), or open an existing project first.', 'Nessun progetto aperto: con "Nuovo progetto…" verrà scaricato e aperto un progetto di partenza (serve connessione), oppure apri prima un progetto esistente.')
           wrapMode: Text.WordWrap
           font.pointSize: Theme.tinyFont.pointSize
           color: Theme.warningColor
@@ -1351,8 +1369,8 @@ Item {
           visible: plugin.writeMode === 'broken' || plugin.readMode === 'broken'
           Layout.fillWidth: true
           text: plugin.writeMode === 'broken'
-                ? qsTr('Attenzione: il self-test di scrittura file è fallito su questo dispositivo. Apri Diagnostica e invia il report allo sviluppatore.')
-                : qsTr('Nota: su questo dispositivo la rilettura dei file è difettosa; creazione e salvataggio funzionano, ma l\'elenco dei layer può risultare vuoto riaprendo il plugin.')
+                ? T('Warning: the file write self-test failed on this device. Open Diagnostics and send the report to the developer.', 'Attenzione: il self-test di scrittura file è fallito su questo dispositivo. Apri Diagnostica e invia il report allo sviluppatore.')
+                : T('Note: file re-reading is faulty on this device; creation and saving work, but the layer list may appear empty when reopening the plugin.', 'Nota: su questo dispositivo la rilettura dei file è difettosa; creazione e salvataggio funzionano, ma l\'elenco dei layer può risultare vuoto riaprendo il plugin.')
           wrapMode: Text.WordWrap
           font.pointSize: Theme.tinyFont.pointSize
           color: Theme.warningColor
@@ -1360,7 +1378,7 @@ Item {
 
         Button {
           Layout.fillWidth: true
-          text: qsTr('Crea layer')
+          text: T('Create layer', 'Crea layer')
           onClicked: {
             if (plugin.createLayer(nameField.text,
                                    geometryCombo.geometryTypes[geometryCombo.currentIndex],
@@ -1384,19 +1402,24 @@ Item {
 
           Label {
             Layout.fillWidth: true
-            text: qsTr('Layer creati (%1)').arg(plugin.layerIndex.length)
+            text: T('Created layers (%1)', 'Layer creati (%1)').arg(plugin.layerIndex.length)
             font.bold: true
             font.pointSize: Theme.defaultFont.pointSize + 2
           }
 
           Button {
-            text: qsTr('Esporta tutti')
+            text: T('Layers ZIP', 'ZIP layer')
             enabled: plugin.layerIndex.length > 0
             onClicked: plugin.exportAll()
           }
 
           Button {
-            text: qsTr('Diagnostica')
+            text: T('Project ZIP', 'ZIP progetto')
+            onClicked: plugin.exportProject()
+          }
+
+          Button {
+            text: T('Diagnostics', 'Diagnostica')
             onClicked: {
               diagnosticsDialog.report = plugin.diagnosticsReport()
               diagnosticsDialog.open()
@@ -1407,7 +1430,7 @@ Item {
         Label {
           visible: plugin.layerIndex.length === 0
           Layout.fillWidth: true
-          text: qsTr('Nessun layer creato finora. I layer vengono salvati come GeoJSON nella cartella "%1" del progetto.').arg(plugin.layersDirName)
+          text: T('No layers created yet. Layers are saved as GeoJSON in the project folder "%1".', 'Nessun layer creato finora. I layer vengono salvati come GeoJSON nella cartella "%1" del progetto.').arg(plugin.layersDirName)
           wrapMode: Text.WordWrap
           color: Theme.secondaryTextColor
         }
@@ -1432,7 +1455,7 @@ Item {
 
               Label {
                 Layout.fillWidth: true
-                text: modelData.name + (modelData.inProject ? ' · ' + qsTr('in legenda') : '')
+                text: modelData.name + (modelData.inProject ? ' · ' + T('in legend', 'in legenda') : '')
                 font.bold: true
                 elide: Text.ElideRight
               }
@@ -1441,8 +1464,8 @@ Item {
                 Layout.fillWidth: true
                 text: plugin.geometryLabel(modelData.geometry)
                       + (modelData.inProject
-                         ? ' · ' + qsTr('modifica con gli strumenti QField')
-                         : ' · ' + qsTr('%1 geometrie').arg(modelData.featureCount))
+                         ? ' · ' + T('edit with QField tools', 'modifica con gli strumenti QField')
+                         : ' · ' + T('%1 features', '%1 geometrie').arg(modelData.featureCount))
                       + ' · ' + modelData.file
                 font.pointSize: Theme.tinyFont.pointSize
                 color: Theme.secondaryTextColor
@@ -1455,28 +1478,28 @@ Item {
 
                 Button {
                   visible: !modelData.inProject
-                  text: qsTr('Digitalizza')
+                  text: T('Digitize', 'Digitalizza')
                   onClicked: plugin.startDigitizing(index)
                 }
                 Button {
                   visible: !modelData.inProject
-                  text: qsTr('In legenda')
+                  text: T('To legend', 'In legenda')
                   onClicked: plugin.retryAddToProject(index)
                 }
                 Button {
-                  text: qsTr('Esporta')
+                  text: T('Export', 'Esporta')
                   onClicked: plugin.exportLayer(index)
                 }
                 Button {
-                  text: qsTr('Condividi')
+                  text: T('Share', 'Condividi')
                   onClicked: plugin.shareLayer(index)
                 }
                 Button {
-                  text: qsTr('CSV')
+                  text: T('CSV', 'CSV')
                   onClicked: plugin.exportLayerCsv(index)
                 }
                 Button {
-                  text: qsTr('Elimina')
+                  text: T('Delete', 'Elimina')
                   onClicked: {
                     deleteDialog.layerIdx = index
                     deleteDialog.open()
@@ -1498,7 +1521,7 @@ Item {
     id: projectDialog
     parent: mainWindow.contentItem
     modal: true
-    title: qsTr('Nuovo progetto')
+    title: T('New project', 'Nuovo progetto')
     implicitWidth: Math.min(mainWindow.width - 40, 420)
     x: (mainWindow.width - width) / 2
     y: (mainWindow.height - height) / 2
@@ -1510,14 +1533,14 @@ Item {
       TextField {
         id: projectNameField
         Layout.fillWidth: true
-        placeholderText: qsTr('Nome del progetto (es. Rilievo luglio)')
+        placeholderText: T('Project name (e.g. July survey)', 'Nome del progetto (es. Rilievo luglio)')
       }
 
       Label {
         Layout.fillWidth: true
         text: plugin.currentProjectFile !== ''
-              ? qsTr('Verrà creato un progetto .qgs con sfondo OpenStreetMap nella sottocartella createlayer_projects del progetto corrente, centrato sulla posizione GPS se attiva, e aperto subito. I layer creati al suo interno compariranno in legenda.')
-              : qsTr('Nessun progetto aperto: verrà scaricato un progetto di partenza con sfondo OpenStreetMap (serve connessione) e aperto subito. I layer creati al suo interno compariranno in legenda.')
+              ? T('A .qgs project with OpenStreetMap background will be created in the createlayer_projects subfolder of the current project, centered on the GPS position if active, and opened immediately. Layers created inside it will appear in the legend.', 'Verrà creato un progetto .qgs con sfondo OpenStreetMap nella sottocartella createlayer_projects del progetto corrente, centrato sulla posizione GPS se attiva, e aperto subito. I layer creati al suo interno compariranno in legenda.')
+              : T('No project open: a starter project with OpenStreetMap background will be downloaded (network required) and opened immediately. Layers created inside it will appear in the legend.', 'Nessun progetto aperto: verrà scaricato un progetto di partenza con sfondo OpenStreetMap (serve connessione) e aperto subito. I layer creati al suo interno compariranno in legenda.')
         wrapMode: Text.WordWrap
         font.pointSize: Theme.tinyFont.pointSize
         color: Theme.secondaryTextColor
@@ -1538,7 +1561,7 @@ Item {
     id: diagnosticsDialog
     parent: mainWindow.contentItem
     modal: true
-    title: qsTr('Diagnostica')
+    title: T('Diagnostics', 'Diagnostica')
     implicitWidth: Math.min(mainWindow.width - 40, 500)
     implicitHeight: Math.min(mainWindow.height - 80, 560)
     x: (mainWindow.width - width) / 2
@@ -1568,10 +1591,10 @@ Item {
 
       Button {
         Layout.fillWidth: true
-        text: qsTr('Copia negli appunti')
+        text: T('Copy to clipboard', 'Copia negli appunti')
         onClicked: {
           platformUtilities.copyTextToClipboard(diagnosticsDialog.report)
-          plugin.toast(qsTr('Diagnostica copiata negli appunti'))
+          plugin.toast(T('Diagnostics copied to clipboard', 'Diagnostica copiata negli appunti'))
         }
       }
     }
@@ -1585,7 +1608,7 @@ Item {
     id: deleteDialog
     parent: mainWindow.contentItem
     modal: true
-    title: qsTr('Eliminare il layer?')
+    title: T('Delete the layer?', 'Eliminare il layer?')
     implicitWidth: Math.min(mainWindow.width - 40, 420)
     x: (mainWindow.width - width) / 2
     y: (mainWindow.height - height) / 2
@@ -1595,7 +1618,7 @@ Item {
 
     contentItem: Label {
       text: deleteDialog.layerIdx >= 0 && deleteDialog.layerIdx < plugin.layerIndex.length
-            ? qsTr('Il layer "%1" verrà rimosso dal progetto e il file GeoJSON eliminato definitivamente.').arg(plugin.layerIndex[deleteDialog.layerIdx].name)
+            ? T('Layer "%1" will be removed from the project and its GeoJSON file permanently deleted.', 'Il layer "%1" verrà rimosso dal progetto e il file GeoJSON eliminato definitivamente.').arg(plugin.layerIndex[deleteDialog.layerIdx].name)
             : ''
       wrapMode: Text.WordWrap
     }
@@ -1615,7 +1638,7 @@ Item {
     id: attributeDialog
     parent: mainWindow.contentItem
     modal: true
-    title: qsTr('Attributi')
+    title: T('Attributes', 'Attributi')
     implicitWidth: Math.min(mainWindow.width - 40, 420)
     x: (mainWindow.width - width) / 2
     y: (mainWindow.height - height) / 2
@@ -1632,7 +1655,7 @@ Item {
 
       Label {
         visible: attributeDialog.activeFields.length === 0
-        text: qsTr('Questo layer non ha campi: la geometria verrà salvata senza attributi.')
+        text: T('This layer has no fields: the feature will be saved without attributes.', 'Questo layer non ha campi: la geometria verrà salvata senza attributi.')
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
       }
@@ -1765,7 +1788,7 @@ Item {
         text: plugin.activeLayerIdx >= 0
               ? plugin.layerIndex[plugin.activeLayerIdx].name
                 + (plugin.layerIndex[plugin.activeLayerIdx].geometry !== 'Point'
-                   ? ' · ' + qsTr('%1 vertici').arg(plugin.pendingVertices.length)
+                   ? ' · ' + T('%1 vertices', '%1 vertici').arg(plugin.pendingVertices.length)
                    : '')
               : ''
         color: 'white'
@@ -1776,28 +1799,28 @@ Item {
         spacing: 8
 
         Button {
-          text: qsTr('+ GPS')
+          text: T('+ GPS', '+ GPS')
           onClicked: plugin.addVertexFromGps()
         }
         Button {
-          text: qsTr('+ Centro')
+          text: T('+ Center', '+ Centro')
           onClicked: plugin.addVertexFromCenter()
         }
         Button {
           visible: plugin.activeLayerIdx >= 0
                    && plugin.layerIndex[plugin.activeLayerIdx].geometry !== 'Point'
           enabled: plugin.pendingVertices.length > 0
-          text: qsTr('Annulla vertice')
+          text: T('Undo vertex', 'Annulla vertice')
           onClicked: plugin.undoVertex()
         }
         Button {
           visible: plugin.activeLayerIdx >= 0
                    && plugin.layerIndex[plugin.activeLayerIdx].geometry !== 'Point'
-          text: qsTr('Concludi')
+          text: T('Finish', 'Concludi')
           onClicked: plugin.finishFeature()
         }
         Button {
-          text: qsTr('Chiudi')
+          text: T('Close', 'Chiudi')
           onClicked: plugin.stopDigitizing()
         }
       }

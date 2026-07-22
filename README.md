@@ -4,6 +4,12 @@ Plugin per **QField** (≥ 3.2) che permette di **creare nuovi layer direttament
 sul campo**, digitalizzare geometrie ed **esportare/condividere** i dati
 raccolti, senza dover tornare in QGIS desktop.
 
+> **English**: QField plugin to create GeoJSON layers directly in the field,
+> add them to the project legend (.qgs), digitize with QField tools or via
+> GPS/map center, and export/share data (GeoJSON, CSV, ZIP of the layers
+> folder or of the whole project). The UI is bilingual: it follows the
+> device language (English by default, Italian on Italian devices).
+
 ## Funzionalità
 
 - **Creazione progetto sul campo**: dal pulsante **Nuovo progetto…** il
@@ -46,8 +52,11 @@ raccolti, senza dover tornare in QGIS desktop.
   - **Condividi**: invia il GeoJSON tramite le app di condivisione del
     dispositivo (email, Telegram, Drive, ecc.);
   - **CSV**: genera ed esporta una tabella CSV con geometria WKT e attributi;
-  - **Esporta tutti**: comprime l'intera cartella `qfield_layers/` e la
-    condivide come archivio.
+  - **ZIP layer**: comprime l'intera cartella `qfield_layers/` e la
+    condivide come archivio;
+  - **ZIP progetto**: comprime l'intera cartella del progetto corrente
+    (file `.qgs` incluso) e la condivide — utile per portare tutto in QGIS
+    desktop o passarlo a un collega.
 
 ## Installazione
 
