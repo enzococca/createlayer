@@ -62,11 +62,16 @@ raccolti, senza dover tornare in QGIS desktop.
 
 ### Da URL (consigliato)
 
-In QField: **Impostazioni → Plugin → Installa plugin da URL** e incolla:
+In QField: **Impostazioni → Plugin → Installa plugin da URL** e incolla
+l'URL **versionato** dell'ultima versione (immune alla cache del CDN):
 
 ```
-https://github.com/enzococca/createlayer/raw/main/createlayer.zip
+https://github.com/enzococca/createlayer/raw/main/releases/1.11.1/createlayer.zip
 ```
+
+Esiste anche l'URL "latest" `https://github.com/enzococca/createlayer/raw/main/createlayer.zip`,
+ma il CDN di GitHub può servirlo con qualche minuto di ritardo dopo un
+aggiornamento.
 
 ### Da ZIP
 
