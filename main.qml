@@ -90,6 +90,114 @@ Item {
   }
 
   // ---------------------------------------------------------------------
+  // Self-test di scrittura/lettura: su alcune build (es. iOS) la
+  // conversione stringa <-> QByteArray è difettosa; il plugin verifica al
+  // primo uso quale modalità di scrittura produce file corretti
+  // ---------------------------------------------------------------------
+
+  readonly property string selftestContent: 'createlayer-selftest-0123456789'
+  readonly property string selftestMd5: '6759049ff2a5b14184120ce0c3dfdc5b'
+  property string ioMode: 'unknown'
+  property string ioDetail: ''
+  property string ioCheckedFor: ''
+
+  // Codifica UTF-8 manuale in ArrayBuffer (indipendente dal ponte
+  // stringa->QByteArray del motore QML)
+  function strToBuffer(s) {
+    const bytes = []
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i)
+      if (c < 0x80) {
+        bytes.push(c)
+      } else if (c < 0x800) {
+        bytes.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f))
+      } else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+        const c2 = s.charCodeAt(i + 1)
+        if (c2 >= 0xdc00 && c2 <= 0xdfff) {
+          const cp = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00)
+          bytes.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f),
+                     0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f))
+          i++
+        } else {
+          bytes.push(0xef, 0xbf, 0xbd)
+        }
+      } else {
+        bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f))
+      }
+    }
+    const buf = new ArrayBuffer(bytes.length)
+    const view = new Uint8Array(buf)
+    for (let i = 0; i < bytes.length; i++)
+      view[i] = bytes[i]
+    return buf
+  }
+
+  function fileMd5(path) {
+    try {
+      const info = FileUtils.getFileInfo(path)
+      if (info && info.md5 !== undefined && info.md5 !== null)
+        return ('' + info.md5).toLowerCase()
+    } catch (e) {
+    }
+    return ''
+  }
+
+  function ensureIo() {
+    if (homePath() === '')
+      return
+    if (ioMode !== 'unknown' && ioCheckedFor === homePath())
+      return
+    ioCheckedFor = homePath()
+    const p = layersDir() + '/selftest.txt'
+
+    // 1) scrittura come stringa
+    FileUtils.writeFileContent(p, selftestContent)
+    const stringBack = toStr(FileUtils.readFileContent(p))
+    if (stringBack === selftestContent) {
+      ioMode = 'string'
+      ioDetail = 'ok'
+      platformUtilities.rmFile(p)
+      return
+    }
+    const stringMd5 = fileMd5(p)
+
+    // 2) scrittura come buffer UTF-8
+    FileUtils.writeFileContent(p, strToBuffer(selftestContent))
+    const bufferBack = toStr(FileUtils.readFileContent(p))
+    if (bufferBack === selftestContent) {
+      ioMode = 'buffer'
+      ioDetail = 'scrittura stringa difettosa; uso buffer binario'
+      platformUtilities.rmFile(p)
+      logDebug('selftest IO: ' + ioMode + ' — ' + ioDetail)
+      return
+    }
+    const bufferMd5 = fileMd5(p)
+
+    // 3) round-trip fallito in entrambe le modalità: verifica se almeno la
+    //    scrittura è corretta tramite md5 (lettura difettosa)
+    if (bufferMd5 === selftestMd5) {
+      ioMode = 'buffer-read-broken'
+      ioDetail = 'scrittura buffer ok (md5 verificato), lettura difettosa'
+    } else if (stringMd5 === selftestMd5) {
+      ioMode = 'string-read-broken'
+      ioDetail = 'scrittura stringa ok (md5 verificato), lettura difettosa'
+    } else {
+      ioMode = 'broken'
+      ioDetail = 'md5 stringa=' + stringMd5 + ', md5 buffer=' + bufferMd5
+                 + ', atteso=' + selftestMd5
+    }
+    platformUtilities.rmFile(p)
+    logDebug('selftest IO: ' + ioMode + ' — ' + ioDetail)
+  }
+
+  // Scrittura testo con la modalità individuata dal self-test
+  function writeText(path, s) {
+    if (ioMode === 'buffer' || ioMode === 'buffer-read-broken')
+      return FileUtils.writeFileContent(path, strToBuffer(s))
+    return FileUtils.writeFileContent(path, s)
+  }
+
+  // ---------------------------------------------------------------------
   // Utilità file (FileUtils restituisce QByteArray: decodifica robusta)
   // ---------------------------------------------------------------------
 
@@ -169,6 +277,7 @@ Item {
       return false
     }
     platformUtilities.createDir(homePath(), layersDirName)
+    ensureIo()
     const parsed = readJsonFile(indexPath(), [])
     if (!Array.isArray(parsed)) {
       logDebug('indice non valido (non è un array): ' + indexPath())
@@ -180,7 +289,7 @@ Item {
   }
 
   function saveIndex() {
-    FileUtils.writeFileContent(indexPath(), JSON.stringify(layerIndex, null, 2))
+    writeText(indexPath(), JSON.stringify(layerIndex, null, 2))
     // Riassegnazione per forzare l'aggiornamento delle viste QML
     layerIndex = layerIndex.slice()
   }
@@ -272,7 +381,7 @@ Item {
       'crs': { 'type': 'name', 'properties': { 'name': 'urn:ogc:def:crs:OGC:1.3:CRS84' } },
       'features': (fields.length > 0 && inTocMode) ? [templateFeature(fields)] : []
     }
-    if (!FileUtils.writeFileContent(layersDir() + '/' + file, JSON.stringify(collection))) {
+    if (!writeText(layersDir() + '/' + file, JSON.stringify(collection))) {
       logDebug('scrittura fallita: ' + layersDir() + '/' + file)
       toast(qsTr('Errore: impossibile scrivere il file del layer (cartella di sola lettura?)'))
       return false
@@ -303,7 +412,7 @@ Item {
       }
       // Niente TOC: la riga di esempio non serve nella modalità integrata
       collection.features = []
-      FileUtils.writeFileContent(layersDir() + '/' + file, JSON.stringify(collection))
+      writeText(layersDir() + '/' + file, JSON.stringify(collection))
       toast(qsTr('Impossibile registrare il layer nel progetto: uso la modalità integrata'))
     }
 
@@ -366,8 +475,11 @@ Item {
   function addLayerToProject(lyr) {
     const path = projectFilePath()
     let xml = toStr(FileUtils.readFileContent(path))
-    if (xml === '') {
-      logDebug('lettura progetto fallita o vuota: ' + path)
+    // Un progetto valido deve contenere la radice <qgis>: contenuto vuoto o
+    // corrotto (es. file scritto con il ponte stringa difettoso) non lo è
+    if (xml.indexOf('<qgis') < 0) {
+      logDebug('lettura progetto fallita, vuota o corrotta: ' + path
+               + ' (byte letti=' + xml.length + ')')
       if (!isPluginProject())
         return false
       // Progetto generato dal plugin: ricostruito da zero dal template,
@@ -384,7 +496,7 @@ Item {
       logDebug('progetto rigenerato dal template: ' + path)
     } else {
       // Backup del progetto prima di modificarlo
-      FileUtils.writeFileContent(path + '.createlayer.bak', xml)
+      writeText(path + '.createlayer.bak', xml)
     }
 
     const result = injectLayerXml(xml, lyr)
@@ -392,7 +504,7 @@ Item {
       logDebug('iniezione layer fallita (struttura progetto inattesa): ' + path)
       return false
     }
-    if (!FileUtils.writeFileContent(path, result)) {
+    if (!writeText(path, result)) {
       logDebug('scrittura progetto fallita: ' + path)
       return false
     }
@@ -449,7 +561,7 @@ Item {
     if (xml === '')
       return false
 
-    FileUtils.writeFileContent(path + '.createlayer.bak', xml)
+    writeText(path + '.createlayer.bak', xml)
 
     // Rimuove la voce di legenda (inserita dal plugin, quindi auto-chiusa)
     const treeRe = new RegExp('\\s*<layer-tree-layer id="' + lyr.layerId + '"[^>]*/>')
@@ -465,7 +577,7 @@ Item {
         xml = xml.slice(0, start) + xml.slice(end + '</maplayer>'.length)
     }
 
-    FileUtils.writeFileContent(path, xml)
+    writeText(path, xml)
     return true
   }
 
@@ -591,7 +703,7 @@ Item {
         : { 'xmin': -180, 'ymin': -60, 'xmax': 180, 'ymax': 75 }
 
     const projPath = projectsDir + '/' + dirName + '/' + dirName + '.qgs'
-    if (!FileUtils.writeFileContent(projPath, projectTemplate(name.trim(), ext))
+    if (!writeText(projPath, projectTemplate(name.trim(), ext))
         || !FileUtils.fileExists(projPath)) {
       logDebug('scrittura progetto fallita: ' + projPath)
       toast(qsTr('Errore: impossibile scrivere il file di progetto (cartella di sola lettura?)'))
@@ -738,7 +850,7 @@ Item {
       'properties': properties,
       'geometry': pendingGeometry
     })
-    FileUtils.writeFileContent(layerPath(lyr), JSON.stringify(activeCollection))
+    writeText(layerPath(lyr), JSON.stringify(activeCollection))
     lyr.featureCount = activeCollection.features.length
     saveIndex()
     pendingGeometry = null
@@ -752,7 +864,9 @@ Item {
 
   function diagnosticsReport() {
     const lines = []
-    lines.push('plugin: Create Layer')
+    lines.push('plugin: Create Layer 1.6.0')
+    ensureIo()
+    lines.push('ioMode: ' + ioMode + (ioDetail !== '' ? ' (' + ioDetail + ')' : ''))
     lines.push('projectFile: ' + projectFilePath())
     lines.push('homePath: ' + homePath())
     lines.push('canEditProject: ' + canEditProject())
@@ -874,7 +988,7 @@ Item {
       csv += '\n'
     }
     const csvPath = layersDir() + '/' + lyr.file.replace(/\.geojson$/, '.csv')
-    FileUtils.writeFileContent(csvPath, csv)
+    writeText(csvPath, csv)
     platformUtilities.exportDatasetTo(csvPath)
   }
 
@@ -1041,6 +1155,17 @@ Item {
           visible: plugin.currentProjectFile === ''
           Layout.fillWidth: true
           text: qsTr('Nessun progetto aperto: con "Nuovo progetto…" verrà scaricato e aperto un progetto di partenza (serve connessione), oppure apri prima un progetto esistente.')
+          wrapMode: Text.WordWrap
+          font.pointSize: Theme.tinyFont.pointSize
+          color: Theme.warningColor
+        }
+
+        Label {
+          visible: plugin.ioMode === 'broken' || plugin.ioMode.indexOf('read-broken') >= 0
+          Layout.fillWidth: true
+          text: plugin.ioMode === 'broken'
+                ? qsTr('Attenzione: il self-test di scrittura file è fallito su questo dispositivo. Apri Diagnostica e invia il report allo sviluppatore.')
+                : qsTr('Nota: su questo dispositivo la rilettura dei file è difettosa; creazione e salvataggio funzionano, ma l\'elenco dei layer può risultare vuoto riaprendo il plugin.')
           wrapMode: Text.WordWrap
           font.pointSize: Theme.tinyFont.pointSize
           color: Theme.warningColor

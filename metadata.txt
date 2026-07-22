@@ -3,5 +3,5 @@ name=Create Layer
 description=Crea nuovi layer GeoJSON direttamente sul campo e aggiungili alla legenda del progetto (.qgs), digitalizza con gli strumenti QField o via GPS/centro mappa, esporta/condividi i dati (GeoJSON, CSV, cartella compressa).
 author=Enzo Cocca
 icon=icon.svg
-version=1.5.1
+version=1.6.0
 homepage=https://github.com/enzococca/createlayer
