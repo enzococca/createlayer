@@ -592,8 +592,11 @@ Item {
     parent: mainWindow.contentItem
     modal: true
     title: qsTr('Create Layer')
-    width: Math.min(mainWindow.width - 40, 500)
-    height: Math.min(mainWindow.height - 80, 640)
+    // implicitWidth/Height espliciti: evitano il binding loop del Dialog
+    // Material (implicitWidth calcolata dal contenuto che dipende dalla
+    // larghezza del dialogo stesso)
+    implicitWidth: Math.min(mainWindow.width - 40, 500)
+    implicitHeight: Math.min(mainWindow.height - 80, 640)
     x: (mainWindow.width - width) / 2
     y: (mainWindow.height - height) / 2
     standardButtons: Dialog.Close
@@ -777,18 +780,18 @@ Item {
     parent: mainWindow.contentItem
     modal: true
     title: qsTr('Eliminare il layer?')
+    implicitWidth: Math.min(mainWindow.width - 40, 420)
     x: (mainWindow.width - width) / 2
     y: (mainWindow.height - height) / 2
     standardButtons: Dialog.Yes | Dialog.No
 
     property int layerIdx: -1
 
-    Label {
+    contentItem: Label {
       text: deleteDialog.layerIdx >= 0 && deleteDialog.layerIdx < plugin.layerIndex.length
             ? qsTr('Il layer "%1" verrà rimosso dal progetto e il file GeoJSON eliminato definitivamente.').arg(plugin.layerIndex[deleteDialog.layerIdx].name)
             : ''
       wrapMode: Text.WordWrap
-      width: Math.min(mainWindow.width - 80, 400)
     }
 
     onAccepted: {
@@ -807,7 +810,7 @@ Item {
     parent: mainWindow.contentItem
     modal: true
     title: qsTr('Attributi')
-    width: Math.min(mainWindow.width - 40, 420)
+    implicitWidth: Math.min(mainWindow.width - 40, 420)
     x: (mainWindow.width - width) / 2
     y: (mainWindow.height - height) / 2
     standardButtons: Dialog.Save | Dialog.Cancel
