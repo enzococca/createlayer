@@ -95,10 +95,14 @@ Item {
     if (typeof content === 'string')
       return content
     try {
+      // Decodifica a blocchi: molto più veloce del ciclo per singolo byte
+      // sui file di progetto di grandi dimensioni
       const view = new Uint8Array(content)
-      let s = ''
-      for (let i = 0; i < view.length; i++)
-        s += String.fromCharCode(view[i])
+      const chunkSize = 8192
+      const parts = []
+      for (let i = 0; i < view.length; i += chunkSize)
+        parts.push(String.fromCharCode.apply(null, view.subarray(i, Math.min(i + chunkSize, view.length))))
+      const s = parts.join('')
       try {
         // Riconversione UTF-8 dei caratteri multibyte
         return decodeURIComponent(escape(s))
@@ -212,13 +216,20 @@ Item {
     }
 
     const fields = parseFields(fieldsSpec)
+    const inTocMode = canEditProject()
+    // La riga di esempio (senza geometria) serve solo quando il layer viene
+    // aperto dal provider OGR di QGIS: definisce i tipi dei campi
     const collection = {
       'type': 'FeatureCollection',
       'name': name.trim(),
       'crs': { 'type': 'name', 'properties': { 'name': 'urn:ogc:def:crs:OGC:1.3:CRS84' } },
-      'features': fields.length > 0 ? [templateFeature(fields)] : []
+      'features': (fields.length > 0 && inTocMode) ? [templateFeature(fields)] : []
     }
-    FileUtils.writeFileContent(layersDir() + '/' + file, JSON.stringify(collection))
+    if (!FileUtils.writeFileContent(layersDir() + '/' + file, JSON.stringify(collection))) {
+      iface.logMessage('[createlayer] scrittura fallita: ' + layersDir() + '/' + file)
+      toast(qsTr('Errore: impossibile scrivere il file del layer (cartella di sola lettura?)'))
+      return false
+    }
 
     const lyr = {
       'name': name.trim(),
@@ -233,7 +244,7 @@ Item {
 
     // Se possibile, registra il layer nel progetto .qgs così da farlo
     // comparire nella legenda (TOC) di QField
-    if (canEditProject()) {
+    if (inTocMode) {
       if (addLayerToProject(lyr)) {
         lyr.inProject = true
         layerIndex.push(lyr)
@@ -243,6 +254,9 @@ Item {
         toast(qsTr('Layer "%1" creato e aggiunto al progetto: usa gli strumenti di digitalizzazione di QField').arg(lyr.name))
         return true
       }
+      // Niente TOC: la riga di esempio non serve nella modalità integrata
+      collection.features = []
+      FileUtils.writeFileContent(layersDir() + '/' + file, JSON.stringify(collection))
       toast(qsTr('Impossibile registrare il layer nel progetto: uso la modalità integrata'))
     }
 
@@ -286,7 +300,11 @@ Item {
   function addLayerToProject(lyr) {
     const path = projectFilePath()
     let xml = toStr(FileUtils.readFileContent(path))
-    if (xml === '' || xml.indexOf('<layer-tree-group') < 0)
+    if (xml === '') {
+      iface.logMessage('[createlayer] lettura progetto fallita o vuota: ' + path)
+      return false
+    }
+    if (xml.indexOf('<layer-tree-group') < 0)
       return false
     if (xml.indexOf('</projectlayers>') < 0 && xml.indexOf('<projectlayers/>') < 0)
       return false
@@ -327,7 +345,10 @@ Item {
       xml = xml.slice(0, groupEnd + 1) + treeLayer + xml.slice(groupEnd + 1)
     }
 
-    FileUtils.writeFileContent(path, xml)
+    if (!FileUtils.writeFileContent(path, xml)) {
+      iface.logMessage('[createlayer] scrittura progetto fallita: ' + path)
+      return false
+    }
     return true
   }
 
@@ -361,15 +382,9 @@ Item {
   // Creazione di un nuovo progetto .qgs
   // ---------------------------------------------------------------------
 
-  function appDataDir() {
-    const dirs = platformUtilities.appDataDirs()
-    if (!dirs || dirs.length === 0)
-      return ''
-    let d = '' + dirs[0]
-    while (d.length > 0 && d.charAt(d.length - 1) === '/')
-      d = d.slice(0, -1)
-    return d
-  }
+  // Progetto di partenza scaricabile quando nessun progetto è aperto
+  // (FileUtils può scrivere solo dentro la cartella del progetto corrente)
+  readonly property string starterProjectUrl: 'https://raw.githubusercontent.com/enzococca/createlayer/main/starter_project.qgs'
 
   function crsBlockWgs84() {
     return '<spatialrefsys nativeFormat="Wkt">\n'
@@ -429,12 +444,20 @@ Item {
       toast(qsTr('Inserisci un nome per il progetto'))
       return false
     }
-    const base = appDataDir()
-    if (base === '') {
-      toast(qsTr('Impossibile individuare la cartella dati di QField'))
-      return false
+
+    // Senza un progetto aperto QField non permette di scrivere file:
+    // si scarica un progetto di partenza dal repository del plugin
+    if (homePath() === '') {
+      projectDialog.close()
+      layerDialog.close()
+      iface.importUrl(starterProjectUrl, name.trim(), true)
+      toast(qsTr('Download del progetto di partenza in corso (serve connessione): verrà aperto automaticamente'))
+      return true
     }
 
+    // Con un progetto aperto, il nuovo .qgs viene creato nella sua cartella
+    // (unica posizione scrivibile), in createlayer_projects/
+    const base = homePath()
     platformUtilities.createDir(base, 'createlayer_projects')
     const projectsDir = base + '/createlayer_projects'
 
@@ -477,11 +500,20 @@ Item {
         : { 'xmin': -180, 'ymin': -60, 'xmax': 180, 'ymax': 75 }
 
     const projPath = projectsDir + '/' + dirName + '/' + dirName + '.qgs'
-    FileUtils.writeFileContent(projPath, projectTemplate(name.trim(), ext))
+    if (!FileUtils.writeFileContent(projPath, projectTemplate(name.trim(), ext))
+        || !FileUtils.fileExists(projPath)) {
+      iface.logMessage('[createlayer] scrittura progetto fallita: ' + projPath)
+      toast(qsTr('Errore: impossibile scrivere il file di progetto (cartella di sola lettura?)'))
+      return false
+    }
 
     projectDialog.close()
     layerDialog.close()
-    iface.loadFile(projPath, name.trim())
+    if (!iface.loadFile(projPath, name.trim())) {
+      iface.logMessage('[createlayer] apertura progetto fallita: ' + projPath)
+      toast(qsTr('Progetto creato in %1 ma apertura automatica fallita: aprilo dai file locali di QField').arg(projPath))
+      return true
+    }
     toast(qsTr('Progetto "%1" creato e aperto: ora puoi creare layer che finiscono in legenda').arg(name.trim()))
     return true
   }
@@ -807,7 +839,7 @@ Item {
         Label {
           visible: plugin.currentProjectFile === ''
           Layout.fillWidth: true
-          text: qsTr('Nessun progetto aperto: crea un nuovo progetto con il pulsante qui sopra, oppure apri un progetto esistente.')
+          text: qsTr('Nessun progetto aperto: con "Nuovo progetto…" verrà scaricato e aperto un progetto di partenza (serve connessione), oppure apri prima un progetto esistente.')
           wrapMode: Text.WordWrap
           font.pointSize: Theme.tinyFont.pointSize
           color: Theme.warningColor
@@ -956,7 +988,9 @@ Item {
 
       Label {
         Layout.fillWidth: true
-        text: qsTr('Verrà creato un progetto .qgs con sfondo OpenStreetMap nella cartella dati di QField (createlayer_projects), centrato sulla posizione GPS se attiva, e aperto subito. I layer creati al suo interno compariranno in legenda.')
+        text: plugin.currentProjectFile !== ''
+              ? qsTr('Verrà creato un progetto .qgs con sfondo OpenStreetMap nella sottocartella createlayer_projects del progetto corrente, centrato sulla posizione GPS se attiva, e aperto subito. I layer creati al suo interno compariranno in legenda.')
+              : qsTr('Nessun progetto aperto: verrà scaricato un progetto di partenza con sfondo OpenStreetMap (serve connessione) e aperto subito. I layer creati al suo interno compariranno in legenda.')
         wrapMode: Text.WordWrap
         font.pointSize: Theme.tinyFont.pointSize
         color: Theme.secondaryTextColor

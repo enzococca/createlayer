@@ -8,9 +8,16 @@ raccolti, senza dover tornare in QGIS desktop.
 
 - **Creazione progetto sul campo**: dal pulsante **Nuovo progetto…** il
   plugin genera un progetto **`.qgs`** pronto all'uso (sfondo OpenStreetMap,
-  CRS EPSG:4326, centrato sulla posizione GPS se attiva) nella cartella dati
-  di QField (`createlayer_projects/`) e lo apre subito. Funziona anche senza
-  alcun progetto aperto. I layer creati al suo interno compaiono in legenda.
+  CRS EPSG:4326, centrato sulla posizione GPS se attiva) e lo apre subito.
+  Per le restrizioni di sicurezza di QField il plugin può scrivere solo
+  dentro la cartella del progetto corrente, quindi:
+  - **con un progetto aperto** il nuovo `.qgs` viene creato nella
+    sottocartella `createlayer_projects/` del progetto corrente;
+  - **senza alcun progetto aperto** viene scaricato e aperto un progetto di
+    partenza (`starter_project.qgs` da questo repository — serve
+    connessione).
+
+  I layer creati al suo interno compaiono in legenda.
 - **Creazione layer sul campo**: nome, tipo di geometria (punto, linea,
   poligono) e campi attributo personalizzati (`string`, `number`, `date`).
   I layer sono salvati come **GeoJSON (EPSG:4326)** nella sottocartella
@@ -67,8 +74,9 @@ https://github.com/enzococca/createlayer/raw/main/createlayer.zip
 3. **Progetti `.qgs`**: il layer viene aggiunto alla legenda e il progetto
    ricaricato. Selezionalo nella legenda e digitalizza con gli strumenti
    normali di QField (pulsante **+**). Se il layer ha dei campi, contiene
-   una **riga di esempio senza geometria** che ne definisce i tipi: puoi
-   eliminarla in QGIS quando vuoi.
+   una **riga di esempio senza geometria** che ne definisce i tipi (è
+   normale vederla come feature "senza geometria"): puoi eliminarla in
+   QGIS o in QField quando vuoi, dopo aver inserito la prima feature reale.
 4. **Progetti `.qgz`** (legenda non modificabile): seleziona il layer e
    premi **Digitalizza**. Usa **+ GPS** (posizione corrente) o **+ Centro**
    (mirino al centro mappa) per aggiungere punti o vertici; per
@@ -111,11 +119,13 @@ I GeoJSON sono in EPSG:4326 e si aprono direttamente in QGIS desktop
 
 ```
 createlayer/
-├── main.qml          # logica e interfaccia del plugin
-├── metadata.txt      # metadati (nome, versione, autore)
-├── icon.svg          # icona della toolbar
-├── package.py        # genera createlayer.zip
-├── createlayer.zip   # pacchetto installabile
+├── main.qml              # logica e interfaccia del plugin
+├── metadata.txt          # metadati (nome, versione, autore)
+├── icon.svg              # icona della toolbar
+├── starter_project.qgs   # progetto di partenza (scaricato dal plugin
+│                         #   quando nessun progetto è aperto)
+├── package.py            # genera createlayer.zip
+├── createlayer.zip       # pacchetto installabile
 └── README.md
 ```
 
